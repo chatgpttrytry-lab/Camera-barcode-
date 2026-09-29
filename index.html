@@ -4834,6 +4834,187 @@ function renderBillingPayment(){
         : "";
   }
 }
+/* POS Billing optional external-keyboard layer. Existing touch buttons/actions remain the source of truth. */
+function billingKeyboardIsOpen(){
+  return !!document.getElementById('billing-overlay')?.classList.contains('open');
+}
+function billingKeyboardFocusSearch(){
+  const input=document.getElementById('billing-search');
+  if(!input)return;
+  try{input.focus({preventScroll:true});}catch(e){try{input.focus()}catch(_){}}
+  try{input.select();}catch(e){}
+}
+function billingKeyboardOpenAddItem(){
+  try{
+    openItemDatabase();
+    openDBForm();
+    requestAnimationFrame(()=>document.getElementById('db-name')?.focus());
+  }catch(e){
+    // Keep keyboard support optional: never break Billing if the DB window changes.
+    try{openItemDatabase()}catch(_){ }
+  }
+}
+function billingKeyboardAddShortcutBadge(el,key){
+  if(!el || el.dataset.billingKbdBadge==='1')return;
+  el.dataset.billingKbdBadge='1';
+  el.classList.add('billing-kbd-host');
+  const badge=document.createElement('span');
+  badge.className='billing-kbd-badge';
+  badge.textContent=key;
+  badge.setAttribute('aria-label','Keyboard shortcut '+key);
+  el.appendChild(badge);
+}
+function billingKeyboardApplyBadges(){
+  if(!billingKeyboardIsOpen())return;
+  const overlay=document.getElementById('billing-overlay');
+  const search=document.getElementById('billing-search');
+  const wrap=document.querySelector('#billing-overlay .billing-search-wrap');
+  if(wrap && wrap.dataset.billingF1!=='1'){
+    wrap.dataset.billingF1='1';
+    wrap.classList.add('billing-kbd-search-wrap');
+    const badge=document.createElement('span');
+    badge.className='billing-kbd-input-badge';
+    badge.textContent='F1';
+    badge.setAttribute('aria-label','Keyboard shortcut F1');
+    wrap.appendChild(badge);
+  }
+  billingKeyboardAddShortcutBadge(document.getElementById('billing-barcode-toggle'),'F2');
+  const addItemLabel=overlay?.querySelector('.billing-add-position > span');
+  if(addItemLabel && !addItemLabel.querySelector('.billing-kbd-inline-badge')){
+    const badge=document.createElement('span');
+    badge.className='billing-kbd-inline-badge';
+    badge.textContent='F3';
+    badge.setAttribute('aria-label','Keyboard shortcut F3');
+    addItemLabel.appendChild(badge);
+  }
+  billingKeyboardAddShortcutBadge(document.getElementById('billing-mode-cash'),'F4');
+  billingKeyboardAddShortcutBadge(document.getElementById('billing-mode-upi'),'F5');
+  billingKeyboardAddShortcutBadge(document.getElementById('billing-mode-card'),'F6');
+  billingKeyboardAddShortcutBadge(document.getElementById('billing-mode-mdr'),'F7');
+  const save=overlay?.querySelector('.billing-save');
+  const invoice=overlay?.querySelector('.billing-invoice');
+  const next=overlay?.querySelector('.billing-next');
+  const print=overlay?.querySelector('.billing-one-tap');
+  billingKeyboardAddShortcutBadge(save,'F9');
+  billingKeyboardAddShortcutBadge(invoice,'F10');
+  billingKeyboardAddShortcutBadge(print,'F11');
+  billingKeyboardAddShortcutBadge(next,'F12');
+
+  // F8 has no separate visible button in the original Billing UI. Add only a
+  // small shortcut action inside the existing Payment Mode header area.
+  const modeRow=overlay?.querySelector('.billing-payment-mode-row');
+  const label=modeRow?.querySelector('.billing-payment-mode-label');
+  if(label && !label.querySelector('.billing-payment-details-kbd')){
+    const b=document.createElement('button');
+    b.type='button';
+    b.className='billing-payment-details-kbd';
+    b.textContent='💰 Payment Details  [F8]';
+    b.title='Payment Details (F8)';
+    b.onclick=()=>openBillingPaymentPopup();
+    label.appendChild(b);
+  }
+  if(search && document.activeElement===document.body) billingKeyboardFocusSearch();
+}
+function billingKeyboardMove(delta){
+  const input=document.getElementById('billing-search');
+  if(!billingKeyboardIsOpen() || !input)return false;
+  const q=String(input.value||'').trim();
+  if(!q)return false;
+  const box=document.getElementById('billing-search-results');
+  if(!box)return false;
+  const rows=[...box.querySelectorAll('.billing-result:not(.billing-new-item)')];
+  if(!rows.length)return false;
+  if(billingKeyboardSearchQuery!==q.toLowerCase()){
+    billingKeyboardSearchQuery=q.toLowerCase();
+    billingKeyboardSelectedIndex=-1;
+  }
+  let next=billingKeyboardSelectedIndex+delta;
+  if(next<0)next=rows.length-1;
+  if(next>=rows.length)next=0;
+  billingKeyboardSelectedIndex=next;
+  rows.forEach((row,i)=>row.classList.toggle('billing-kbd-selected',i===next));
+  rows[next]?.scrollIntoView({block:'nearest'});
+  return true;
+}
+function billingKeyboardSelect(){
+  const input=document.getElementById('billing-search');
+  if(!billingKeyboardIsOpen() || !input)return false;
+  const box=document.getElementById('billing-search-results');
+  const rows=[...box?.querySelectorAll('.billing-result:not(.billing-new-item)')||[]];
+  if(!rows.length)return false;
+  let idx=billingKeyboardSelectedIndex;
+  if(idx<0 || idx>=rows.length)idx=0;
+  const row=rows[idx];
+  const id=row?.getAttribute('data-billing-kbd-item-id');
+  if(id){addDBItemToBilling(Number(id));return true;}
+  row?.click();
+  return true;
+}
+function billingKeyboardKeydown(e){
+  if(!billingKeyboardIsOpen())return;
+  // Never hijack typing/editing in another input, textarea, select or contenteditable.
+  const target=e.target;
+  const tag=String(target?.tagName||'').toLowerCase();
+  const editable=!!target?.isContentEditable || tag==='textarea' || tag==='select';
+  const search=target?.id==='billing-search';
+
+  // F6/F7 are POS payment shortcuts and must win even when an input has focus.
+  // Handle them first in capture phase so page controls cannot turn them into
+  // browser-level navigation/focus actions when the key event reaches the page.
+  if(e.key==='F6' || e.code==='F6' || e.key==='F7' || e.code==='F7'){
+    const isF6=(e.key==='F6' || e.code==='F6');
+    e.preventDefault();
+    e.stopPropagation();
+    if(typeof e.stopImmediatePropagation==='function')e.stopImmediatePropagation();
+    try{
+      if(isF6)setBillingPaymentModeQuick('Credit Card');
+      else setBillingPaymentModeQuick('MDR');
+    }catch(err){console.error('Billing F6/F7 shortcut',e.key,err)}
+    return;
+  }
+
+  const actions={
+    F1:()=>billingKeyboardFocusSearch(),
+    F2:()=>toggleBillingBarcodeMode(),
+    F3:()=>billingKeyboardOpenAddItem(),
+    F4:()=>setBillingPaymentModeQuick('Cash'),
+    F5:()=>setBillingPaymentModeQuick('UPI'),
+    F6:()=>setBillingPaymentModeQuick('Credit Card'),
+    F7:()=>setBillingPaymentModeQuick('MDR'),
+    F8:()=>openBillingPaymentPopup(),
+    F9:()=>saveBillingBillOnly(),
+    F10:()=>generateInvoiceFromBilling(),
+    F11:()=>oneTapPrintFromBilling(),
+    F12:()=>startNextBillingBill()
+  };
+  if(Object.prototype.hasOwnProperty.call(actions,e.key)){
+    // Keep number/text fields fully usable. Function-key shortcuts are active
+    // from the Billing surface, but never while editing another input field.
+    if(editable || (target && (tag==='input') && !search))return;
+    e.preventDefault();
+    e.stopPropagation();
+    try{actions[e.key]()}catch(err){console.error('Billing keyboard shortcut',e.key,err)}
+    return;
+  }
+  if(editable || !search)return;
+  if(e.key==='ArrowDown'){
+    e.preventDefault();e.stopPropagation();billingKeyboardMove(1);return;
+  }
+  if(e.key==='ArrowUp'){
+    e.preventDefault();e.stopPropagation();billingKeyboardMove(-1);return;
+  }
+  if(e.key==='Enter'){
+    if(billingKeyboardSelect()){
+      e.preventDefault();e.stopPropagation();
+    }
+  }
+}
+function initBillingKeyboardShortcuts(){
+  if(billingKeyboardBound)return;
+  billingKeyboardBound=true;
+  document.addEventListener('keydown',billingKeyboardKeydown,true);
+}
+
 function openBilling(){
   try{initBillingBarcodeScanner();updateBillingBarcodeToggle()}catch(e){}
   // Restore only an explicitly unfinished bill. Completed bills are stored in
@@ -4854,6 +5035,7 @@ function openBilling(){
   document.getElementById("billing-overlay").classList.add("open");
   document.getElementById("billing-overlay").setAttribute("aria-hidden","false");
   renderBillingSearch(); renderBillingCart(); renderBillingPayment(); loadUPISettings(); loadCreditCardSettings(); updateBillingDraftCount(); startBillingLiveClock();
+  try{initBillingKeyboardShortcuts();requestAnimationFrame(billingKeyboardApplyBadges);}catch(e){}
   refreshBillingPrinterStatus();
   // If Billing opens without a connected printer, immediately show the printer
   // connection window in front of Billing so the user can connect it.
@@ -4908,6 +5090,11 @@ let billingBarcodeRapid=false;
 let billingBarcodeBound=false;
 let billingBarcodePendingNotFound='';
 let billingBarcodeScanBuffer='';
+// Optional external-keyboard control for POS Billing. This layer never changes
+// billing data/calculation logic; it only triggers existing actions.
+let billingKeyboardSelectedIndex=-1;
+let billingKeyboardSearchQuery='';
+let billingKeyboardBound=false;
 function billingBarcodeText(v){return String(v??'').trim()}
 function billingBarcodeValue(item){return billingBarcodeText(item?.code||item?.barcode||item?.barCode||item?.sku||'')}
 function findBillingItemByExactBarcode(code){const n=billingBarcodeText(code).toLowerCase();if(!n)return null;return getItemDB().find(x=>billingBarcodeValue(x).toLowerCase()===n)||null}
@@ -4955,7 +5142,6 @@ async function billingCameraSwitch(){
     if(billingCameraStream){billingCameraStream.getTracks().forEach(t=>{try{t.stop()}catch(e){}});billingCameraStream=null;}
     billingCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:billingCameraFacing},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}},audio:false});
     const track=billingCameraStream.getVideoTracks?.()[0];
-    if(track?.applyConstraints){try{const caps=track.getCapabilities?.()||{};const adv={};if(caps.focusMode?.includes?.('continuous'))adv.focusMode='continuous';if(caps.exposureMode?.includes?.('continuous'))adv.exposureMode='continuous';if(Object.keys(adv).length)await track.applyConstraints({advanced:[adv]});}catch(e){}}
     video.srcObject=billingCameraStream;video.setAttribute('playsinline','');video.muted=true;await video.play();
     billingCameraSetMessage((billingCameraFacing==='environment'?'REAR':'FRONT')+' • LIVE • Align barcode inside the box');
     billingCameraLastCode='';billingCameraLastCodeAt=0;billingCameraLastSeenAt=0;billingCameraPaused=false;
@@ -5084,7 +5270,6 @@ async function openBillingCameraScanner(){
     try{billingCameraDetector=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf','codabar']});}catch(_){billingCameraDetector=new BarcodeDetector();}
     try{billingCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{exact:'environment'},width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30,max:60}},audio:false});}
     catch(e){if(e?.name==='OverconstrainedError')billingCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}},audio:false});else throw e;}
-    const track=billingCameraStream.getVideoTracks?.()[0];if(track?.applyConstraints){try{await track.applyConstraints({advanced:[{focusMode:'continuous'}]});}catch(e){}}
     video.srcObject=billingCameraStream;video.setAttribute('playsinline','');video.muted=true;await video.play();
     msg.textContent='REAR • LIVE • Align barcode inside the box • scanning…';
     scanBillingCameraFrame();
@@ -5136,21 +5321,11 @@ async function scanBillingCameraFrame(){
   if(!video||video.readyState<2||!overlay?.classList.contains('open'))return;
   billingCameraBusy=true;
   try{
-    // Decode only the visual area inside the on-screen barcode guide.
-    // This prevents faces, product pictures and unrelated text from being
-    // treated as the barcode target.
-    const vw=video.videoWidth||1280,vh=video.videoHeight||720;
-    const sx=Math.round(vw*.08), sy=Math.round(vh*.30);
-    const sw=Math.max(1,Math.round(vw*.84)), sh=Math.max(1,Math.round(vh*.40));
-    let source=video;
-    try{
-      if(!billingCameraCropCanvas)billingCameraCropCanvas=document.createElement('canvas');
-      const c=billingCameraCropCanvas,ctx=c.getContext('2d',{willReadFrequently:true});
-      const scale=Math.min(1,1000/sw);
-      c.width=Math.max(1,Math.round(sw*scale));c.height=Math.max(1,Math.round(sh*scale));
-      ctx.drawImage(video,sx,sy,sw,sh,0,0,c.width,c.height);
-      source=c;
-    }catch(e){source=video;}
+    // AUTO FOCUS is intentionally not controlled by the app.
+    // The phone/camera keeps its normal native focus behavior.
+    // BarcodeDetector watches the LIVE camera frame directly, so a barcode
+    // appearing anywhere in front of the camera can be detected automatically.
+    const source=video;
     const hits=await billingCameraDetector.detect(source);
     const now=Date.now();
     const code=String(hits?.find(x=>String(x?.rawValue||'').trim())?.rawValue||'').trim();
@@ -5161,7 +5336,6 @@ async function scanBillingCameraFrame(){
       if(code!==billingCameraLastCode && now-billingCameraLastCodeAt>=BILLING_CAMERA_COOLDOWN){
         billingCameraLastCode=code;
         billingCameraLastCodeAt=now;
-        billingCameraBusy=false;
         billingBarcodePendingNotFound='';
         const ok=processBillingBarcodeScan(code);
         billingCameraFeedback();
@@ -5169,10 +5343,18 @@ async function scanBillingCameraFrame(){
           const item=findBillingItemByExactBarcode(code);
           billingCameraShowAdded(item);
           billingCameraSetMessage('✓ Added • Move barcode away → READY');
+          // IMPORTANT: keep the live scanner loop running after every successful scan.
+          // The previous version returned here without scheduling the next frame,
+          // so the first scan worked but every later scan was ignored.
+          billingCameraBusy=false;
+          billingCameraScanTimer=setTimeout(scanBillingCameraFrame,80);
+          return;
         }else{
+          // Unknown barcode intentionally pauses so the user can choose Add New / Retry.
           billingCameraShowNotFound(code);
+          billingCameraBusy=false;
+          return;
         }
-        return;
       }
     }else if(billingCameraLastCode && now-billingCameraLastSeenAt>BILLING_CAMERA_REARM_MS){
       billingCameraLastCode='';
@@ -5272,6 +5454,7 @@ function renderBillingSearch(){
   const input=document.getElementById("billing-search");
   const raw=(input?.value||"").trim();
   const q=raw.toLowerCase();
+  if(q!==billingKeyboardSearchQuery){billingKeyboardSearchQuery=q;billingKeyboardSelectedIndex=-1;}
   const db=getItemDB();
   const stats=getBillingSalesStats();
 
@@ -5293,10 +5476,13 @@ function renderBillingSearch(){
     box.innerHTML='<div class="billing-result billing-new-item" onclick="addNewItemFromBillingSearch()"><div class="billing-result-info"><div class="billing-result-name">＋ Add new item: '+escapeHtml(raw)+'</div><div class="billing-result-price">Not in database • tap to add MRP, Rate &amp; Purchase</div></div><button onclick="event.stopPropagation();addNewItemFromBillingSearch()">ADD NEW</button></div>';
     return;
   }
-  box.innerHTML=list.map((o,rank)=>'<div class="billing-result" onclick="addDBItemToBilling('+Number(o.x.id)+')">'+
+  if(billingKeyboardSelectedIndex>=list.length) billingKeyboardSelectedIndex=list.length-1;
+  box.innerHTML=list.map((o,rank)=>'<div class="billing-result'+(rank===billingKeyboardSelectedIndex?' billing-kbd-selected':'')+'" data-billing-kbd-index="'+rank+'" data-billing-kbd-item-id="'+Number(o.x.id)+'" onclick="addDBItemToBilling('+Number(o.x.id)+')">'+
     '<div class="billing-result-info"><div class="billing-result-name">'+escapeHtml(o.x.name)+(o.sold>0?'<span class="billing-result-rank">🔥 '+o.sold+' SOLD</span>':'')+
     '</div><div class="billing-result-price">MRP '+moneyShort(o.x.mrp)+' • Rate '+moneyShort(o.x.rate)+'</div></div>'+
     '<button onclick="event.stopPropagation();addDBItemToBilling('+Number(o.x.id)+')">ADD</button></div>').join("");
+  const selected=box.querySelector('.billing-kbd-selected');
+  if(selected) selected.scrollIntoView({block:'nearest'});
 }
 
 function addNewItemFromBillingSearch(){
@@ -8355,6 +8541,25 @@ window.bsLegacyPhysicalPrint=()=>{const dims=$('bs-size').value.split('x');docum
   font-weight:900!important;
   white-space:normal!important;
   overflow:visible!important;
+}
+</style>
+
+<style id="billing-external-keyboard-ui">
+/* Optional external keyboard UI. Existing POS layout/data remain unchanged. */
+.billing-kbd-host{position:relative!important;}
+.billing-kbd-badge{position:absolute;right:4px;top:3px;min-width:20px;height:16px;padding:0 4px;border-radius:5px;background:rgba(0,0,0,.10);color:inherit;font-size:8px;font-weight:950;line-height:16px;text-align:center;pointer-events:none;box-sizing:border-box;z-index:2;}
+.billing-kbd-search-wrap{position:relative!important;}
+.billing-kbd-inline-badge{display:inline-flex!important;align-items:center;justify-content:center;margin-left:6px;min-width:22px;height:18px;padding:0 5px;border-radius:6px;background:rgba(0,0,0,.08);color:inherit;font-size:8px;font-weight:950;line-height:18px;vertical-align:middle;box-sizing:border-box;}
+.billing-kbd-input-badge{position:absolute;right:38px;top:50%;transform:translateY(-50%);height:19px;min-width:24px;padding:0 5px;border-radius:6px;background:var(--blue);color:#fff;font-size:9px;font-weight:950;line-height:19px;text-align:center;pointer-events:none;z-index:3;box-shadow:0 2px 6px rgba(0,0,0,.12);}
+.billing-payment-details-kbd{float:right;margin-left:6px;height:24px;padding:0 7px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--blue);font-size:8px;font-weight:900;cursor:pointer;vertical-align:middle;}
+.billing-payment-details-kbd:active{transform:scale(.98);}
+.billing-result.billing-kbd-selected{outline:2px solid var(--blue)!important;outline-offset:-2px;background:rgba(22,119,255,.09)!important;box-shadow:inset 0 0 0 1px rgba(22,119,255,.16);}
+.billing-result.billing-kbd-selected button{background:var(--blue)!important;color:#fff!important;}
+@media(max-width:560px){
+  .billing-kbd-badge{right:2px;top:2px;min-width:18px;height:14px;line-height:14px;font-size:7px;padding:0 3px;}
+  .billing-kbd-inline-badge{min-width:20px;height:16px;line-height:16px;font-size:7px;padding:0 4px;margin-left:4px;}
+  .billing-kbd-input-badge{right:37px;height:17px;min-width:22px;line-height:17px;font-size:8px;}
+  .billing-payment-details-kbd{height:22px;font-size:7px;padding:0 5px;margin-left:4px;}
 }
 </style>
 
