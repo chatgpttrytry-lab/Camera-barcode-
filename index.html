@@ -4983,6 +4983,83 @@ function billingCameraAddNew(){
   billingBarcodePendingNotFound=code;
   addNewItemFromBillingBarcode();
 }
+/* Movable + resizable floating Billing camera window. Position and size are user-adjustable and persisted. */
+(function(){
+  const KEY='billing-camera-floating-layout-v1';
+  let drag=null, resize=null;
+  function card(){return document.getElementById('billing-camera-card')}
+  function load(){
+    const c=card(); if(!c)return;
+    let d=null; try{d=JSON.parse(localStorage.getItem(KEY)||'null')}catch(e){}
+    const w=Math.max(250,Math.min(Number(d?.w)||350,window.innerWidth-16));
+    const h=d?.h?Math.max(220,Math.min(Number(d.h),window.innerHeight-16)):null;
+    const left=Math.max(8,Math.min(Number(d?.x)||Math.max(8,window.innerWidth-w-8),window.innerWidth-w-8));
+    const top=Math.max(8,Math.min(Number(d?.y)||72,window.innerHeight-(h||230)-8));
+    c.style.setProperty('--billing-cam-left',left+'px'); c.style.setProperty('--billing-cam-top',top+'px'); c.style.setProperty('--billing-cam-width',w+'px');
+    if(h)c.style.setProperty('--billing-cam-height',h+'px'); else c.style.removeProperty('--billing-cam-height');
+  }
+  function save(){
+    const c=card(); if(!c)return;
+    const r=c.getBoundingClientRect();
+    try{localStorage.setItem(KEY,JSON.stringify({x:Math.round(r.left),y:Math.round(r.top),w:Math.round(r.width),h:Math.round(r.height)}))}catch(e){}
+  }
+  function clamp(x,y,w,h){
+    const maxW=Math.max(250,window.innerWidth-16), maxH=Math.max(220,window.innerHeight-16);
+    w=Math.max(250,Math.min(w,maxW)); h=Math.max(220,Math.min(h,maxH));
+    x=Math.max(8,Math.min(x,window.innerWidth-w-8)); y=Math.max(8,Math.min(y,window.innerHeight-h-8));
+    return {x,y,w,h};
+  }
+  function setRect(x,y,w,h,forceH){
+    const c=card(); if(!c)return;
+    const q=clamp(x,y,w,h);
+    c.style.setProperty('--billing-cam-left',q.x+'px'); c.style.setProperty('--billing-cam-top',q.y+'px'); c.style.setProperty('--billing-cam-width',q.w+'px');
+    if(forceH)c.style.setProperty('--billing-cam-height',q.h+'px');
+  }
+  function pointerMove(e){
+    const c=card(); if(!c)return;
+    if(drag){
+      const r=c.getBoundingClientRect(); setRect(drag.x+e.clientX-drag.sx,drag.y+e.clientY-drag.sy,r.width,r.height,false); return;
+    }
+    if(resize){
+      const r=c.getBoundingClientRect(); setRect(r.left,r.top,resize.w+e.clientX-resize.sx,resize.h+e.clientY-resize.sy, true); return;
+    }
+  }
+  function end(){
+    const c=card(); if(!c)return;
+    if(drag||resize){c.classList.remove('is-dragging','is-resizing');save()}
+    drag=null; resize=null; window.removeEventListener('pointermove',pointerMove,true); window.removeEventListener('pointerup',end,true); window.removeEventListener('pointercancel',end,true);
+  }
+  function startDrag(e){
+    const c=card(); if(!c||document.fullscreenElement===c)return;
+    if(e.button!==undefined&&e.button!==0)return;
+    if(e.target.closest('button'))return;
+    const r=c.getBoundingClientRect(); drag={sx:e.clientX,sy:e.clientY,x:r.left,y:r.top}; c.classList.add('is-dragging');
+    try{e.preventDefault();e.stopPropagation()}catch(_){}
+    window.addEventListener('pointermove',pointerMove,true);window.addEventListener('pointerup',end,true);window.addEventListener('pointercancel',end,true);
+  }
+  function startResize(e){
+    const c=card(); if(!c||document.fullscreenElement===c)return;
+    const r=c.getBoundingClientRect(); resize={sx:e.clientX,sy:e.clientY,w:r.width,h:r.height}; c.classList.add('is-resizing');
+    try{e.preventDefault();e.stopPropagation()}catch(_){}
+    window.addEventListener('pointermove',pointerMove,true);window.addEventListener('pointerup',end,true);window.addEventListener('pointercancel',end,true);
+  }
+  function reset(){try{localStorage.removeItem(KEY)}catch(e){} const c=card();if(c){c.style.removeProperty('--billing-cam-left');c.style.removeProperty('--billing-cam-top');c.style.removeProperty('--billing-cam-width');c.style.removeProperty('--billing-cam-height');load()}}
+  window.billingCameraResetFloatingLayout=reset;
+  function init(){
+    const c=card();if(!c)return;
+    load();
+    const h=document.getElementById('billing-camera-drag-handle'), rh=document.getElementById('billing-camera-resize-handle');
+    if(h&&!h._floatBound){h._floatBound=1;h.addEventListener('pointerdown',startDrag,{passive:false})}
+    if(rh&&!rh._floatBound){rh._floatBound=1;rh.addEventListener('pointerdown',startResize,{passive:false})}
+    window.addEventListener('resize',()=>{if(!document.fullscreenElement){const r=c.getBoundingClientRect();setRect(r.left,r.top,r.width,r.height,!!c.style.getPropertyValue('--billing-cam-height'));save()}});
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+  const oldOpen=window.openBillingCameraScanner;
+  if(oldOpen&&!oldOpen._floatingWrapped){
+    const wrapped=async function(){init();return await oldOpen.apply(this,arguments)}; wrapped._floatingWrapped=true; window.openBillingCameraScanner=wrapped;
+  }
+})();
+
 function closeBillingCameraScanner(){
   billingCameraBusy=false;billingCameraPaused=true;billingCameraTorch=false;
   if(billingCameraScanTimer){clearTimeout(billingCameraScanTimer);billingCameraScanTimer=null;}
@@ -8012,7 +8089,7 @@ window.bsLegacyPhysicalPrint=()=>{const dims=$('bs-size').value.split('x');docum
 
 <div id="billing-camera-overlay" class="billing-camera-overlay" aria-hidden="true">
   <div id="billing-camera-card" class="billing-camera-card">
-    <div class="billing-camera-head"><div><b>📷 Live Barcode Scanner</b><small id="billing-camera-msg">Starting camera…</small></div><div class="billing-camera-head-actions"><button type="button" onclick="billingCameraToggleTorch()" aria-label="Toggle flash" title="Flash">⚡</button><button type="button" onclick="billingCameraSwitch()" aria-label="Switch camera" title="Front / Back">🔄</button><button type="button" onclick="billingCameraFullscreen()" aria-label="Fullscreen" title="Fullscreen">⛶</button><button type="button" onclick="closeBillingCameraScanner()" aria-label="Close camera" title="Close">×</button></div></div>
+    <div class="billing-camera-head" id="billing-camera-drag-handle" title="Drag to move • use corner to resize"><div><b>📷 Live Barcode Scanner</b><small id="billing-camera-msg">Starting camera…</small></div><div class="billing-camera-head-actions"><button type="button" onclick="billingCameraToggleTorch()" aria-label="Toggle flash" title="Flash">⚡</button><button type="button" onclick="billingCameraSwitch()" aria-label="Switch camera" title="Front / Back">🔄</button><button type="button" onclick="billingCameraFullscreen()" aria-label="Fullscreen" title="Fullscreen">⛶</button><button type="button" onclick="closeBillingCameraScanner()" aria-label="Close camera" title="Close">×</button></div></div>
     <div id="billing-camera-view" class="billing-camera-view"><video id="billing-camera-video" playsinline muted></video><div class="billing-camera-guide"></div><div class="billing-camera-green-flash"></div><div id="billing-camera-scan-state" class="billing-camera-scan-state">READY TO SCAN</div></div>
     <div id="billing-camera-added" class="billing-camera-added">
       <div class="billing-camera-added-badge">✓ ITEM ADDED</div>
@@ -8022,11 +8099,15 @@ window.bsLegacyPhysicalPrint=()=>{const dims=$('bs-size').value.split('x');docum
     <div id="billing-camera-cart-summary" class="billing-camera-cart-summary"><span>Items: <b id="billing-camera-total-items">0</b></span><span>Qty: <b id="billing-camera-total-qty">0</b></span><span>Payable: <b id="billing-camera-total-payable">₹0</b></span></div>
     <div id="billing-camera-notfound" class="billing-camera-notfound"><b>⚠ Barcode Not Found</b><span id="billing-camera-notfound-code"></span></div>
     <div id="billing-camera-actions" class="billing-camera-actions"><button type="button" onclick="billingCameraAddNew()">➕ Add New Item</button><button type="button" onclick="billingCameraResume()">🔄 Scan Again</button><button type="button" onclick="closeBillingCameraScanner()">✕ Close</button></div>
-    <div class="billing-camera-foot"><b>CONTINUOUS SCAN</b> • Scan → Auto Add → next item • Same item scan = Qty +1 • Move barcode away, then scan again</div>
+    <div class="billing-camera-foot"><b>CONTINUOUS SCAN</b> • Scan → Auto Add → next item • Same item scan = Qty +1 • Move barcode away, then scan again</div><div id="billing-camera-resize-handle" class="billing-camera-resize-handle" title="Drag to resize" aria-label="Resize camera window"></div>
   </div>
 </div>
 <style>
-.billing-camera-overlay{position:fixed;inset:0;background:rgba(0,0,0,.74);z-index:99999;display:none;align-items:center;justify-content:center;padding:12px}.billing-camera-overlay.open{display:flex}.billing-camera-card{width:min(390px,calc(100vw - 24px));max-height:92dvh;background:var(--surface,#fff);color:var(--text,#111);border-radius:18px;overflow:hidden;box-shadow:0 20px 70px rgba(0,0,0,.5)}.billing-camera-head{display:flex;align-items:center;justify-content:space-between;padding:9px 11px;border-bottom:1px solid var(--border,#ddd)}.billing-camera-head b{display:block;font-size:13px}.billing-camera-head small{display:block;margin-top:2px;font-size:9px;color:var(--muted,#777)}.billing-camera-head-actions{display:flex;gap:4px}.billing-camera-head-actions button{width:32px;height:32px;border:0;border-radius:8px;background:var(--surface2,#f3f3f3);font-size:15px;cursor:pointer}.billing-camera-view{position:relative;background:#000;aspect-ratio:16/10;overflow:hidden}.billing-camera-view video{width:100%;height:100%;object-fit:cover;display:block}.billing-camera-guide{position:absolute;left:8%;right:8%;top:30%;height:40%;border:2px solid #fff;border-radius:9px;box-shadow:0 0 0 999px rgba(0,0,0,.30);pointer-events:none}.billing-camera-guide:after{content:'BARCODE ONLY';position:absolute;left:50%;top:-18px;transform:translateX(-50%);padding:2px 6px;border-radius:5px;background:rgba(0,0,0,.62);color:#fff;font-size:7px;font-weight:900;letter-spacing:.5px;white-space:nowrap}.billing-camera-green-flash{position:absolute;inset:0;background:rgba(34,197,94,.40);opacity:0;pointer-events:none}.billing-camera-view.scan-hit .billing-camera-green-flash{animation:billingScanFlash .20s ease-out}@keyframes billingScanFlash{0%{opacity:0}35%{opacity:1}100%{opacity:0}}.billing-camera-scan-state{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);padding:5px 9px;border-radius:999px;background:rgba(0,0,0,.70);color:#fff;font-size:8px;font-weight:900;letter-spacing:.3px;white-space:nowrap}.billing-camera-added{display:none;margin:7px 9px 0;padding:8px 10px;border:1px solid rgba(34,197,94,.38);border-radius:11px;background:rgba(34,197,94,.08);transition:transform .12s,background .18s}.billing-camera-added.show{display:block;animation:billingAddedPop .18s ease-out}.billing-camera-added.flash{background:rgba(34,197,94,.20)}@keyframes billingAddedPop{from{opacity:.4;transform:scale(.98)}to{opacity:1;transform:scale(1)}}.billing-camera-added-badge{font-size:8px;font-weight:900;color:#168a45}.billing-camera-added-name{font-size:12px;font-weight:900;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.billing-camera-added-meta{display:flex;justify-content:space-between;gap:8px;margin-top:3px;font-size:10px;font-weight:900;color:var(--blue)}.billing-camera-cart-summary{display:grid;grid-template-columns:1fr 1fr 1.25fr;gap:5px;padding:6px 9px 1px}.billing-camera-cart-summary span{padding:6px 5px;border-radius:8px;background:var(--surface2);text-align:center;font-size:8px;color:var(--muted);font-weight:800}.billing-camera-cart-summary b{display:block;color:var(--blue);font-size:10px;margin-top:2px}.billing-camera-notfound{display:none;margin:7px 9px 0;padding:8px 9px;border:1px solid rgba(211,59,59,.4);border-radius:10px;background:rgba(211,59,59,.07);color:#c62828;font-size:10px}.billing-camera-notfound span{display:block;margin-top:3px;font-weight:900;word-break:break-all}.billing-camera-actions{display:none;grid-template-columns:1.2fr 1fr .8fr;gap:5px;padding:7px 9px}.billing-camera-actions button{height:36px;border:0;border-radius:9px;font-size:9px;font-weight:900;cursor:pointer}.billing-camera-actions button:first-child{background:var(--blue);color:#fff}.billing-camera-actions button:nth-child(2){background:#e8f5e9;color:#168a45}.billing-camera-actions button:last-child{background:var(--surface2,#f3f3f3);color:var(--text,#111)}.billing-camera-foot{padding:7px 10px 9px;font-size:8px;color:var(--muted,#777);text-align:center}.billing-camera-card:fullscreen{width:100vw;max-width:none;height:100dvh;max-height:none;border-radius:0}.billing-camera-card:fullscreen .billing-camera-view{flex:1;aspect-ratio:auto}@media(max-width:520px){.billing-camera-overlay{padding:7px}.billing-camera-card{width:min(390px,100%);max-height:94dvh;border-radius:16px}.billing-camera-view{aspect-ratio:16/10}}
+.billing-camera-overlay{position:fixed;inset:0;background:transparent;z-index:99999;display:none;align-items:flex-start;justify-content:flex-end;padding:72px 10px 10px;pointer-events:none}.billing-camera-overlay.open{display:flex}.billing-camera-card{width:min(350px,calc(100vw - 20px));max-height:58dvh;background:var(--surface,#fff);color:var(--text,#111);border-radius:16px;overflow:hidden;box-shadow:0 12px 38px rgba(0,0,0,.48);border:1px solid rgba(255,255,255,.12);pointer-events:auto}.billing-camera-head{display:flex;align-items:center;justify-content:space-between;padding:9px 11px;border-bottom:1px solid var(--border,#ddd)}.billing-camera-head b{display:block;font-size:13px}.billing-camera-head small{display:block;margin-top:2px;font-size:9px;color:var(--muted,#777)}.billing-camera-head-actions{display:flex;gap:4px}.billing-camera-head-actions button{width:32px;height:32px;border:0;border-radius:8px;background:var(--surface2,#f3f3f3);font-size:15px;cursor:pointer}.billing-camera-view{position:relative;background:#000;aspect-ratio:16/10;overflow:hidden}.billing-camera-view video{width:100%;height:100%;object-fit:cover;display:block}.billing-camera-guide{position:absolute;left:8%;right:8%;top:30%;height:40%;border:2px solid #fff;border-radius:9px;box-shadow:0 0 0 999px rgba(0,0,0,.30);pointer-events:none}.billing-camera-guide:after{content:'BARCODE ONLY';position:absolute;left:50%;top:-18px;transform:translateX(-50%);padding:2px 6px;border-radius:5px;background:rgba(0,0,0,.62);color:#fff;font-size:7px;font-weight:900;letter-spacing:.5px;white-space:nowrap}.billing-camera-green-flash{position:absolute;inset:0;background:rgba(34,197,94,.40);opacity:0;pointer-events:none}.billing-camera-view.scan-hit .billing-camera-green-flash{animation:billingScanFlash .20s ease-out}@keyframes billingScanFlash{0%{opacity:0}35%{opacity:1}100%{opacity:0}}.billing-camera-scan-state{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);padding:5px 9px;border-radius:999px;background:rgba(0,0,0,.70);color:#fff;font-size:8px;font-weight:900;letter-spacing:.3px;white-space:nowrap}.billing-camera-added{display:none;margin:7px 9px 0;padding:8px 10px;border:1px solid rgba(34,197,94,.38);border-radius:11px;background:rgba(34,197,94,.08);transition:transform .12s,background .18s}.billing-camera-added.show{display:block;animation:billingAddedPop .18s ease-out}.billing-camera-added.flash{background:rgba(34,197,94,.20)}@keyframes billingAddedPop{from{opacity:.4;transform:scale(.98)}to{opacity:1;transform:scale(1)}}.billing-camera-added-badge{font-size:8px;font-weight:900;color:#168a45}.billing-camera-added-name{font-size:12px;font-weight:900;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.billing-camera-added-meta{display:flex;justify-content:space-between;gap:8px;margin-top:3px;font-size:10px;font-weight:900;color:var(--blue)}.billing-camera-cart-summary{display:grid;grid-template-columns:1fr 1fr 1.25fr;gap:5px;padding:6px 9px 1px}.billing-camera-cart-summary span{padding:6px 5px;border-radius:8px;background:var(--surface2);text-align:center;font-size:8px;color:var(--muted);font-weight:800}.billing-camera-cart-summary b{display:block;color:var(--blue);font-size:10px;margin-top:2px}.billing-camera-notfound{display:none;margin:7px 9px 0;padding:8px 9px;border:1px solid rgba(211,59,59,.4);border-radius:10px;background:rgba(211,59,59,.07);color:#c62828;font-size:10px}.billing-camera-notfound span{display:block;margin-top:3px;font-weight:900;word-break:break-all}.billing-camera-actions{display:none;grid-template-columns:1.2fr 1fr .8fr;gap:5px;padding:7px 9px}.billing-camera-actions button{height:36px;border:0;border-radius:9px;font-size:9px;font-weight:900;cursor:pointer}.billing-camera-actions button:first-child{background:var(--blue);color:#fff}.billing-camera-actions button:nth-child(2){background:#e8f5e9;color:#168a45}.billing-camera-actions button:last-child{background:var(--surface2,#f3f3f3);color:var(--text,#111)}.billing-camera-foot{padding:7px 10px 9px;font-size:8px;color:var(--muted,#777);text-align:center}.billing-camera-overlay.open + *{}.billing-camera-card:fullscreen{width:100vw;max-width:none;height:100dvh;max-height:none;border-radius:0}.billing-camera-card:fullscreen .billing-camera-view{flex:1;aspect-ratio:auto}@media(max-width:520px){.billing-camera-overlay{padding:66px 8px 8px;align-items:flex-start;justify-content:flex-end}.billing-camera-card{width:min(330px,calc(100vw - 16px));max-height:52dvh;border-radius:14px}.billing-camera-head{padding:7px 8px}.billing-camera-head-actions button{width:29px;height:29px;font-size:13px}.billing-camera-view{aspect-ratio:16/9}.billing-camera-added{margin:5px 7px 0;padding:6px 8px}.billing-camera-cart-summary{padding:5px 7px 1px;gap:4px}.billing-camera-actions{padding:5px 7px;gap:4px}.billing-camera-actions button{height:32px}.billing-camera-foot{padding:5px 7px 7px;font-size:7px}}
+
+.billing-camera-overlay.open{align-items:flex-start;justify-content:flex-start;padding:0;pointer-events:none}.billing-camera-card{position:fixed;left:var(--billing-cam-left,calc(100vw - 360px));top:var(--billing-cam-top,72px);width:var(--billing-cam-width,350px);height:var(--billing-cam-height,auto);max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);min-width:270px;min-height:230px;resize:none;overflow:hidden;touch-action:none}.billing-camera-head{cursor:move;user-select:none;touch-action:none}.billing-camera-head-actions,.billing-camera-head-actions button{touch-action:auto}.billing-camera-resize-handle{position:absolute;right:2px;bottom:2px;width:28px;height:28px;z-index:20;cursor:nwse-resize;touch-action:none}.billing-camera-resize-handle:before{content:'↘';position:absolute;right:4px;bottom:2px;font-size:18px;font-weight:900;line-height:1;color:rgba(255,255,255,.85);text-shadow:0 1px 3px #000}.billing-camera-card{padding-bottom:2px}.billing-camera-view{min-height:120px}.billing-camera-card.is-dragging,.billing-camera-card.is-resizing{user-select:none}.billing-camera-card.is-dragging{box-shadow:0 16px 48px rgba(0,0,0,.58)}.billing-camera-card.is-resizing{box-shadow:0 16px 48px rgba(0,0,0,.58)}
+.billing-camera-card:fullscreen .billing-camera-resize-handle{display:none}
+@media(max-width:520px){.billing-camera-card{left:var(--billing-cam-left,8px);top:var(--billing-cam-top,66px);width:var(--billing-cam-width,min(330px,calc(100vw - 16px)));max-width:calc(100vw - 16px);max-height:calc(100dvh - 16px);min-width:250px;min-height:220px}.billing-camera-resize-handle{width:32px;height:32px}.billing-camera-resize-handle:before{font-size:20px}}
 </style>
 <script id="sa-home-navigation">
 (function(){
