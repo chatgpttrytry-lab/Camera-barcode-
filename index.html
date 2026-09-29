@@ -4921,6 +4921,7 @@ let billingCameraPaused=false;
 let billingCameraLastCode='';
 let billingCameraLastCodeAt=0;
 let billingCameraLastSeenAt=0;
+let billingCameraCropCanvas=null;
 const BILLING_CAMERA_COOLDOWN=900;
 const BILLING_CAMERA_REARM_MS=700;
 function billingCameraSetMessage(text){const el=document.getElementById('billing-camera-msg');if(el)el.textContent=text;}
@@ -4953,7 +4954,7 @@ async function billingCameraSwitch(){
     if(billingCameraStream){billingCameraStream.getTracks().forEach(t=>{try{t.stop()}catch(e){}});billingCameraStream=null;}
     billingCameraStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:billingCameraFacing},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}},audio:false});
     const track=billingCameraStream.getVideoTracks?.()[0];
-    if(track?.applyConstraints){try{await track.applyConstraints({advanced:[{focusMode:'continuous'}]});}catch(e){}}
+    if(track?.applyConstraints){try{const caps=track.getCapabilities?.()||{};const adv={};if(caps.focusMode?.includes?.('continuous'))adv.focusMode='continuous';if(caps.exposureMode?.includes?.('continuous'))adv.exposureMode='continuous';if(Object.keys(adv).length)await track.applyConstraints({advanced:[adv]});}catch(e){}}
     video.srcObject=billingCameraStream;video.setAttribute('playsinline','');video.muted=true;await video.play();
     billingCameraSetMessage((billingCameraFacing==='environment'?'REAR':'FRONT')+' • LIVE • Align barcode inside the box');
     billingCameraLastCode='';billingCameraLastCodeAt=0;billingCameraLastSeenAt=0;billingCameraPaused=false;
@@ -4998,7 +4999,7 @@ async function openBillingCameraScanner(){
   overlay.classList.add('open');overlay.setAttribute('aria-hidden','false');
   const nf=document.getElementById('billing-camera-notfound');if(nf)nf.style.display='none';
   const actions=document.getElementById('billing-camera-actions');if(actions)actions.style.display='none';
-  msg.textContent='Starting live rear camera…';billingCameraFacing='environment';billingCameraPaused=false;billingCameraLastCode='';billingCameraLastCodeAt=0;billingCameraLastSeenAt=0;billingCameraTorch=false;
+  msg.textContent='Starting live rear camera…';billingCameraFacing='environment';billingCameraPaused=false;billingCameraLastCode='';billingCameraLastCodeAt=0;billingCameraLastSeenAt=0;billingCameraTorch=false;billingCameraCropCanvas=null;const added=document.getElementById('billing-camera-added');if(added)added.classList.remove('show','flash');billingCameraSetState('STARTING CAMERA…');billingCameraUpdateCartSummary();
   if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia){msg.textContent='Camera access unavailable. Live camera needs HTTPS/PWA/localhost.';return;}
   if(!('BarcodeDetector' in window)){msg.textContent='Live camera is available, but barcode scanning is not supported in this browser.';return;}
   try{
@@ -5017,29 +5018,92 @@ async function openBillingCameraScanner(){
     else msg.textContent='Camera access unavailable. Please check camera permission and try again.';
   }
 }
+function billingCameraSetState(text){
+  const el=document.getElementById('billing-camera-scan-state');
+  if(el)el.textContent=text;
+}
+function billingCameraShowAdded(item){
+  const box=document.getElementById('billing-camera-added');
+  if(!box)return;
+  const name=document.getElementById('billing-camera-added-name');
+  const qty=document.getElementById('billing-camera-added-qty');
+  const rate=document.getElementById('billing-camera-added-rate');
+  const existing=item ? billingCart.find(x=>Number(x.id)===Number(item.id)) : null;
+  if(name)name.textContent=item?.name||'Item added';
+  if(qty)qty.textContent='Qty: '+String(existing?.qty||1);
+  if(rate)rate.textContent='₹'+String(Math.round(Number(existing?.rate||item?.rate||0)));
+  box.classList.add('show','flash');
+  clearTimeout(box._hideTimer);
+  box._hideTimer=setTimeout(()=>box.classList.remove('flash'),500);
+  billingCameraUpdateCartSummary();
+  billingCameraSetState('✓ ITEM ADDED');
+  setTimeout(()=>{if(!billingCameraPaused)billingCameraSetState('READY TO SCAN')},850);
+}
+function billingCameraUpdateCartSummary(){
+  const items=Array.isArray(billingCart)?billingCart:[];
+  const totalItems=items.length;
+  const totalQty=items.reduce((n,x)=>n+(Number(x.qty)||0),0);
+  const payable=items.reduce((n,x)=>n+((Number(x.qty)||0)*Math.max(0,Number(effectiveBillingRate(x))||0)),0);
+  const a=document.getElementById('billing-camera-total-items');
+  const b=document.getElementById('billing-camera-total-qty');
+  const c=document.getElementById('billing-camera-total-payable');
+  if(a)a.textContent=String(totalItems);
+  if(b)b.textContent=String(totalQty);
+  if(c)c.textContent='₹'+Math.round(payable);
+}
 async function scanBillingCameraFrame(){
   if(billingCameraBusy||billingCameraPaused||!billingCameraDetector)return;
-  const video=document.getElementById('billing-camera-video');if(!video||video.readyState<2||!document.getElementById('billing-camera-overlay')?.classList.contains('open'))return;
+  const video=document.getElementById('billing-camera-video');
+  const overlay=document.getElementById('billing-camera-overlay');
+  if(!video||video.readyState<2||!overlay?.classList.contains('open'))return;
   billingCameraBusy=true;
   try{
-    const hits=await billingCameraDetector.detect(video);const now=Date.now();
+    // Decode only the visual area inside the on-screen barcode guide.
+    // This prevents faces, product pictures and unrelated text from being
+    // treated as the barcode target.
+    const vw=video.videoWidth||1280,vh=video.videoHeight||720;
+    const sx=Math.round(vw*.08), sy=Math.round(vh*.30);
+    const sw=Math.max(1,Math.round(vw*.84)), sh=Math.max(1,Math.round(vh*.40));
+    let source=video;
+    try{
+      if(!billingCameraCropCanvas)billingCameraCropCanvas=document.createElement('canvas');
+      const c=billingCameraCropCanvas,ctx=c.getContext('2d',{willReadFrequently:true});
+      const scale=Math.min(1,1000/sw);
+      c.width=Math.max(1,Math.round(sw*scale));c.height=Math.max(1,Math.round(sh*scale));
+      ctx.drawImage(video,sx,sy,sw,sh,0,0,c.width,c.height);
+      source=c;
+    }catch(e){source=video;}
+    const hits=await billingCameraDetector.detect(source);
+    const now=Date.now();
     const code=String(hits?.find(x=>String(x?.rawValue||'').trim())?.rawValue||'').trim();
     if(code){
       billingCameraLastSeenAt=now;
-      if(code===billingCameraLastCode){if(now-billingCameraLastCodeAt<BILLING_CAMERA_COOLDOWN){} else { /* same barcode still in view: wait until it leaves */ }}
-      else if(now-billingCameraLastCodeAt>=BILLING_CAMERA_COOLDOWN){
-        billingCameraLastCode=code;billingCameraLastCodeAt=now;
+      // A barcode must leave the guide before it can be counted again.
+      // This prevents one barcode being added repeatedly while held still.
+      if(code!==billingCameraLastCode && now-billingCameraLastCodeAt>=BILLING_CAMERA_COOLDOWN){
+        billingCameraLastCode=code;
+        billingCameraLastCodeAt=now;
         billingCameraBusy=false;
         billingBarcodePendingNotFound='';
         const ok=processBillingBarcodeScan(code);
         billingCameraFeedback();
-        if(!ok)billingCameraShowNotFound(code);
-        else billingCameraSetMessage('✓ Added • Move barcode away and scan next item');
+        if(ok){
+          const item=findBillingItemByExactBarcode(code);
+          billingCameraShowAdded(item);
+          billingCameraSetMessage('✓ Added • Move barcode away → READY');
+        }else{
+          billingCameraShowNotFound(code);
+        }
         return;
       }
-    }else if(billingCameraLastCode&&now-billingCameraLastSeenAt>BILLING_CAMERA_REARM_MS){billingCameraLastCode='';billingCameraLastCodeAt=0;}
+    }else if(billingCameraLastCode && now-billingCameraLastSeenAt>BILLING_CAMERA_REARM_MS){
+      billingCameraLastCode='';
+      billingCameraLastCodeAt=0;
+      billingCameraSetState('READY TO SCAN');
+    }
   }catch(e){}
-  billingCameraBusy=false;billingCameraScanTimer=setTimeout(scanBillingCameraFrame,100);
+  billingCameraBusy=false;
+  billingCameraScanTimer=setTimeout(scanBillingCameraFrame,80);
 }
 
 function updateBillingBarcodeToggle(){const b=document.getElementById('billing-barcode-toggle'),s=document.getElementById('billing-barcode-status');if(b){b.classList.toggle('on',billingBarcodeMode);b.classList.toggle('off',!billingBarcodeMode);b.setAttribute('aria-pressed',billingBarcodeMode?'true':'false');b.textContent=billingBarcodeMode?'🔌 Barcode 🟢 ON':'🔌 Barcode 🔴 OFF'}if(s){s.classList.toggle('on',billingBarcodeMode);s.textContent=billingBarcodeMode?'Barcode scanner: ON • Scan → Enter → Auto Add':'Barcode scanner: OFF • Billing works normally'}}
@@ -5263,6 +5327,7 @@ function addDBItemToBilling(id){
     else billingCart.push(newItem);
   }
   saveBillingCart(); renderBillingCart();
+  if(document.getElementById('billing-camera-overlay')?.classList.contains('open')) billingCameraUpdateCartSummary();
   const search=document.getElementById("billing-search");
   if(search){
     search.value="";
@@ -7948,14 +8013,20 @@ window.bsLegacyPhysicalPrint=()=>{const dims=$('bs-size').value.split('x');docum
 <div id="billing-camera-overlay" class="billing-camera-overlay" aria-hidden="true">
   <div id="billing-camera-card" class="billing-camera-card">
     <div class="billing-camera-head"><div><b>📷 Live Barcode Scanner</b><small id="billing-camera-msg">Starting camera…</small></div><div class="billing-camera-head-actions"><button type="button" onclick="billingCameraToggleTorch()" aria-label="Toggle flash" title="Flash">⚡</button><button type="button" onclick="billingCameraSwitch()" aria-label="Switch camera" title="Front / Back">🔄</button><button type="button" onclick="billingCameraFullscreen()" aria-label="Fullscreen" title="Fullscreen">⛶</button><button type="button" onclick="closeBillingCameraScanner()" aria-label="Close camera" title="Close">×</button></div></div>
-    <div id="billing-camera-view" class="billing-camera-view"><video id="billing-camera-video" playsinline muted></video><div class="billing-camera-guide"></div><div class="billing-camera-green-flash"></div></div>
+    <div id="billing-camera-view" class="billing-camera-view"><video id="billing-camera-video" playsinline muted></video><div class="billing-camera-guide"></div><div class="billing-camera-green-flash"></div><div id="billing-camera-scan-state" class="billing-camera-scan-state">READY TO SCAN</div></div>
+    <div id="billing-camera-added" class="billing-camera-added">
+      <div class="billing-camera-added-badge">✓ ITEM ADDED</div>
+      <div id="billing-camera-added-name" class="billing-camera-added-name">Ready</div>
+      <div class="billing-camera-added-meta"><span id="billing-camera-added-qty">Qty: 0</span><span id="billing-camera-added-rate">₹0</span></div>
+    </div>
+    <div id="billing-camera-cart-summary" class="billing-camera-cart-summary"><span>Items: <b id="billing-camera-total-items">0</b></span><span>Qty: <b id="billing-camera-total-qty">0</b></span><span>Payable: <b id="billing-camera-total-payable">₹0</b></span></div>
     <div id="billing-camera-notfound" class="billing-camera-notfound"><b>⚠ Barcode Not Found</b><span id="billing-camera-notfound-code"></span></div>
     <div id="billing-camera-actions" class="billing-camera-actions"><button type="button" onclick="billingCameraAddNew()">➕ Add New Item</button><button type="button" onclick="billingCameraResume()">🔄 Scan Again</button><button type="button" onclick="closeBillingCameraScanner()">✕ Close</button></div>
-    <div class="billing-camera-foot"><b>CONTINUOUS SCAN</b> • Scan → Auto Add → next item • Existing item = Qty +1 • Move barcode away before scanning it again</div>
+    <div class="billing-camera-foot"><b>CONTINUOUS SCAN</b> • Scan → Auto Add → next item • Same item scan = Qty +1 • Move barcode away, then scan again</div>
   </div>
 </div>
 <style>
-.billing-camera-overlay{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:99999;display:none;align-items:center;justify-content:center;padding:10px}.billing-camera-overlay.open{display:flex}.billing-camera-card{width:min(520px,100%);background:var(--surface,#fff);color:var(--text,#111);border-radius:16px;overflow:hidden;box-shadow:0 20px 70px rgba(0,0,0,.5)}.billing-camera-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border,#ddd)}.billing-camera-head b{display:block;font-size:14px}.billing-camera-head small{display:block;margin-top:3px;font-size:10px;color:var(--muted,#777)}.billing-camera-head-actions{display:flex;gap:5px}.billing-camera-head-actions button{width:36px;height:36px;border:0;border-radius:9px;background:var(--surface2,#f3f3f3);font-size:17px;cursor:pointer}.billing-camera-view{position:relative;background:#000;aspect-ratio:4/3;overflow:hidden}.billing-camera-view video{width:100%;height:100%;object-fit:cover;display:block}.billing-camera-guide{position:absolute;left:9%;right:9%;top:34%;height:32%;border:2px solid #fff;border-radius:10px;box-shadow:0 0 0 999px rgba(0,0,0,.28);pointer-events:none}.billing-camera-green-flash{position:absolute;inset:0;background:rgba(34,197,94,.38);opacity:0;pointer-events:none}.billing-camera-view.scan-hit .billing-camera-green-flash{animation:billingScanFlash .18s ease-out}@keyframes billingScanFlash{0%{opacity:0}35%{opacity:1}100%{opacity:0}}.billing-camera-notfound{display:none;margin:8px 10px 0;padding:9px 10px;border:1px solid rgba(211,59,59,.4);border-radius:10px;background:rgba(211,59,59,.07);color:#c62828;font-size:11px}.billing-camera-notfound span{display:block;margin-top:3px;font-weight:900;word-break:break-all}.billing-camera-actions{display:none;grid-template-columns:1fr 1fr 1fr;gap:6px;padding:8px 10px}.billing-camera-actions button{height:38px;border:0;border-radius:9px;font-size:10px;font-weight:900;cursor:pointer}.billing-camera-actions button:first-child{background:var(--blue);color:#fff}.billing-camera-actions button:nth-child(2){background:#e8f5e9;color:#168a45}.billing-camera-actions button:last-child{background:var(--surface2,#f3f3f3);color:var(--text,#111)}.billing-camera-foot{padding:9px 12px;font-size:10px;color:var(--muted,#777);text-align:center}@media(max-width:520px){.billing-camera-overlay{padding:0}.billing-camera-card{width:100%;height:100dvh;border-radius:0;display:flex;flex-direction:column}.billing-camera-view{flex:1;aspect-ratio:auto}.billing-camera-foot{padding-bottom:max(10px,env(safe-area-inset-bottom))}}
+.billing-camera-overlay{position:fixed;inset:0;background:rgba(0,0,0,.74);z-index:99999;display:none;align-items:center;justify-content:center;padding:12px}.billing-camera-overlay.open{display:flex}.billing-camera-card{width:min(390px,calc(100vw - 24px));max-height:92dvh;background:var(--surface,#fff);color:var(--text,#111);border-radius:18px;overflow:hidden;box-shadow:0 20px 70px rgba(0,0,0,.5)}.billing-camera-head{display:flex;align-items:center;justify-content:space-between;padding:9px 11px;border-bottom:1px solid var(--border,#ddd)}.billing-camera-head b{display:block;font-size:13px}.billing-camera-head small{display:block;margin-top:2px;font-size:9px;color:var(--muted,#777)}.billing-camera-head-actions{display:flex;gap:4px}.billing-camera-head-actions button{width:32px;height:32px;border:0;border-radius:8px;background:var(--surface2,#f3f3f3);font-size:15px;cursor:pointer}.billing-camera-view{position:relative;background:#000;aspect-ratio:16/10;overflow:hidden}.billing-camera-view video{width:100%;height:100%;object-fit:cover;display:block}.billing-camera-guide{position:absolute;left:8%;right:8%;top:30%;height:40%;border:2px solid #fff;border-radius:9px;box-shadow:0 0 0 999px rgba(0,0,0,.30);pointer-events:none}.billing-camera-guide:after{content:'BARCODE ONLY';position:absolute;left:50%;top:-18px;transform:translateX(-50%);padding:2px 6px;border-radius:5px;background:rgba(0,0,0,.62);color:#fff;font-size:7px;font-weight:900;letter-spacing:.5px;white-space:nowrap}.billing-camera-green-flash{position:absolute;inset:0;background:rgba(34,197,94,.40);opacity:0;pointer-events:none}.billing-camera-view.scan-hit .billing-camera-green-flash{animation:billingScanFlash .20s ease-out}@keyframes billingScanFlash{0%{opacity:0}35%{opacity:1}100%{opacity:0}}.billing-camera-scan-state{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);padding:5px 9px;border-radius:999px;background:rgba(0,0,0,.70);color:#fff;font-size:8px;font-weight:900;letter-spacing:.3px;white-space:nowrap}.billing-camera-added{display:none;margin:7px 9px 0;padding:8px 10px;border:1px solid rgba(34,197,94,.38);border-radius:11px;background:rgba(34,197,94,.08);transition:transform .12s,background .18s}.billing-camera-added.show{display:block;animation:billingAddedPop .18s ease-out}.billing-camera-added.flash{background:rgba(34,197,94,.20)}@keyframes billingAddedPop{from{opacity:.4;transform:scale(.98)}to{opacity:1;transform:scale(1)}}.billing-camera-added-badge{font-size:8px;font-weight:900;color:#168a45}.billing-camera-added-name{font-size:12px;font-weight:900;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.billing-camera-added-meta{display:flex;justify-content:space-between;gap:8px;margin-top:3px;font-size:10px;font-weight:900;color:var(--blue)}.billing-camera-cart-summary{display:grid;grid-template-columns:1fr 1fr 1.25fr;gap:5px;padding:6px 9px 1px}.billing-camera-cart-summary span{padding:6px 5px;border-radius:8px;background:var(--surface2);text-align:center;font-size:8px;color:var(--muted);font-weight:800}.billing-camera-cart-summary b{display:block;color:var(--blue);font-size:10px;margin-top:2px}.billing-camera-notfound{display:none;margin:7px 9px 0;padding:8px 9px;border:1px solid rgba(211,59,59,.4);border-radius:10px;background:rgba(211,59,59,.07);color:#c62828;font-size:10px}.billing-camera-notfound span{display:block;margin-top:3px;font-weight:900;word-break:break-all}.billing-camera-actions{display:none;grid-template-columns:1.2fr 1fr .8fr;gap:5px;padding:7px 9px}.billing-camera-actions button{height:36px;border:0;border-radius:9px;font-size:9px;font-weight:900;cursor:pointer}.billing-camera-actions button:first-child{background:var(--blue);color:#fff}.billing-camera-actions button:nth-child(2){background:#e8f5e9;color:#168a45}.billing-camera-actions button:last-child{background:var(--surface2,#f3f3f3);color:var(--text,#111)}.billing-camera-foot{padding:7px 10px 9px;font-size:8px;color:var(--muted,#777);text-align:center}.billing-camera-card:fullscreen{width:100vw;max-width:none;height:100dvh;max-height:none;border-radius:0}.billing-camera-card:fullscreen .billing-camera-view{flex:1;aspect-ratio:auto}@media(max-width:520px){.billing-camera-overlay{padding:7px}.billing-camera-card{width:min(390px,100%);max-height:94dvh;border-radius:16px}.billing-camera-view{aspect-ratio:16/10}}
 </style>
 <script id="sa-home-navigation">
 (function(){
