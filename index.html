@@ -4889,8 +4889,8 @@ function billingKeyboardApplyBadges(){
   }
   billingKeyboardAddShortcutBadge(document.getElementById('billing-mode-cash'),'F4');
   billingKeyboardAddShortcutBadge(document.getElementById('billing-mode-upi'),'F5');
-  billingKeyboardAddShortcutBadge(document.getElementById('billing-mode-card'),'F6');
-  billingKeyboardAddShortcutBadge(document.getElementById('billing-mode-mdr'),'F7');
+  billingKeyboardAddShortcutBadge(document.getElementById('billing-mode-card'),'Ctrl');
+  billingKeyboardAddShortcutBadge(document.getElementById('billing-mode-mdr'),'Alt');
   const save=overlay?.querySelector('.billing-save');
   const invoice=overlay?.querySelector('.billing-invoice');
   const next=overlay?.querySelector('.billing-next');
@@ -4979,14 +4979,23 @@ function billingKeyboardKeydown(e){
     F3:()=>billingKeyboardOpenAddItem(),
     F4:()=>setBillingPaymentModeQuick('Cash'),
     F5:()=>setBillingPaymentModeQuick('UPI'),
-    F6:()=>setBillingPaymentModeQuick('Credit Card'),
-    F7:()=>setBillingPaymentModeQuick('MDR'),
     F8:()=>openBillingPaymentPopup(),
     F9:()=>saveBillingBillOnly(),
     F10:()=>generateInvoiceFromBilling(),
     F11:()=>oneTapPrintFromBilling(),
     F12:()=>startNextBillingBill()
   };
+  // Ctrl = Credit Card, Alt = MDR. F6/F7 are intentionally removed.
+  if(e.ctrlKey && !e.altKey && (e.key==='Control' || e.code==='ControlLeft' || e.code==='ControlRight')){
+    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+    try{setBillingPaymentModeQuick('Credit Card')}catch(err){console.error('Billing keyboard shortcut Ctrl',err)}
+    return;
+  }
+  if(e.altKey && !e.ctrlKey && (e.key==='Alt' || e.code==='AltLeft' || e.code==='AltRight')){
+    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+    try{setBillingPaymentModeQuick('MDR')}catch(err){console.error('Billing keyboard shortcut Alt',err)}
+    return;
+  }
   if(Object.prototype.hasOwnProperty.call(actions,e.key)){
     // Keep number/text fields fully usable. Function-key shortcuts are active
     // from the Billing surface, but never while editing another input field.
