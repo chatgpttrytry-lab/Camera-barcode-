@@ -1177,11 +1177,12 @@ body.home-mode{background:var(--sa-home-bg);align-items:center;overflow:hidden}
     // Optional UPI transaction note. This is encoded as the standard UPI `tn` field.
     // The payment amount remains the calculator result (`am`) and is not changed by the message.
     try {
-        offerMessageInput.value = localStorage.getItem("upi-offer-message") || "";
+        offerMessageInput.value = getCalculatorOfferMessage();
     } catch(e) {}
     if (offerMessageInput) {
         offerMessageInput.addEventListener('input', () => {
-            try { localStorage.setItem("upi-offer-message", offerMessageInput.value); } catch(e) {}
+            const value = String(offerMessageInput.value || '').trim().slice(0,120);
+            saveCalculatorOfferMessage(value, true);
             let currentRes = parseFloat(displayRes.innerText) || parseFloat(expr) || 0;
             updateQR(currentRes);
         });
@@ -1221,7 +1222,7 @@ function toggleTheme(){
         const upi = upiInput.value.trim();
         if(!isValidUpiId(upi)) { alert("Please enter a valid UPI ID, e.g. name@bank"); return; }
         localStorage.setItem('upi-id', upi);
-        try { localStorage.setItem('upi-offer-message', String(offerMessageInput?.value || '')); } catch(e) {}
+        saveCalculatorOfferMessage(String(offerMessageInput?.value || ''), false);
 
         const saved = getSavedQRs().filter(x => x.upi !== upi);
         saved.unshift({id: Date.now(), upi, label: "Saved QR"});
@@ -2286,7 +2287,7 @@ function changeHistoryPaymentMode(id){
     {name:'Cash',icon:'💵'},
     {name:'UPI',icon:'📱'},
     {name:'Credit Card',icon:'💳'},
-    {name:'Other',icon:'💰'}
+    {name:'MDR',icon:'💰'}
   ];
   const overlay=document.createElement('div');
   overlay.id='history-payment-mode-picker';
@@ -2308,6 +2309,18 @@ function changeHistoryPaymentMode(id){
     const fresh=getHistory(), freshIdx=fresh.findIndex(x=>Number(x.id)===Number(id));
     if(freshIdx<0){closePaymentModePicker();return;}
     fresh[freshIdx].paymentMode=mode;
+    // Keep the historical payment destination synchronized with the selected mode.
+    // Never borrow another mode's current/global UPI ID when the bill has a saved snapshot.
+    const snap=(fresh[freshIdx].paymentModeUpi && typeof fresh[freshIdx].paymentModeUpi==='object') ? fresh[freshIdx].paymentModeUpi : null;
+    if(snap){
+      const modeUpi=String(snap[mode]||'').trim();
+      fresh[freshIdx].paymentUpiId=modeUpi;
+      fresh[freshIdx].upi=modeUpi;
+    }
+    // Historical reprints must follow the selected mode's QR rule.
+    if(fresh[freshIdx].displaySettings && typeof fresh[freshIdx].displaySettings==='object'){
+      fresh[freshIdx].displaySettings={...fresh[freshIdx].displaySettings,qr:mode!=='Cash' && isValidUpiId(String(fresh[freshIdx].paymentUpiId||fresh[freshIdx].upi||''))};
+    }
     fresh[freshIdx].paymentModeUpdatedAt=new Date().toISOString();
     saveHistoryRecords(fresh);
     closePaymentModePicker();
@@ -2547,9 +2560,28 @@ function renderHistory(){
           billingBranch.expr=billingInvoiceItemsSourceExpression;
           billingBranch.lastCalculationExpression=billingInvoiceItemsSourceExpression;
           billingBranch.sourceExpression=billingInvoiceItemsSourceExpression;
-          const u=String(item.upi||'').trim(); if(u && typeof billingUpiId!=='undefined'){ billingUpiId=u; localStorage.setItem('upi-primary-upi-id',u); }
+          // A POS history invoice belongs to the payment mode saved with that bill.
+          // Never copy legacy item.upi into the global UPI slot.
+          const savedMode=['Cash','UPI','Credit Card','MDR'].includes(String(item.paymentMode||'')) ? String(item.paymentMode) : 'Cash';
+          billingPaymentMode=savedMode;
+          const savedDiscountPercent=Object.prototype.hasOwnProperty.call(item,'discountPercent')
+            ? Math.min(100,Math.max(0,Number(item.discountPercent)||0)) : 0;
+          billingDiscountPercent=savedDiscountPercent;
+          const discountInput=document.getElementById('billing-discount-percent');
+          if(discountInput) discountInput.value=String(savedDiscountPercent);
+          const savedModeUpi=(item && item.paymentModeUpi && typeof item.paymentModeUpi==='object') ? item.paymentModeUpi : null;
+          if(savedModeUpi){
+            billingCashUpi=String(item.cashUpiId ?? savedModeUpi.Cash ?? '').trim();
+            billingUpiId=String(savedModeUpi.UPI||'').trim();
+            billingCreditCardUpi=String(savedModeUpi['Credit Card']||'').trim();
+            billingMdrUpi=String(savedModeUpi.MDR||'').trim();
+          }else{
+            loadBillingModeUpi(savedMode);
+          }
+          localStorage.setItem('upi-billing-payment-mode',savedMode);
         }
-        document.getElementById('invoice-upi-input').value=item.upi||'';
+        const historyUpi = mode==='billing' ? String(getPaymentUpiId()||'') : String(item.upi||'');
+        document.getElementById('invoice-upi-input').value=historyUpi;
         return item;
     }
     function loadHistoryIntoBilling(id){
@@ -2558,11 +2590,46 @@ function renderHistory(){
   // If the same History bill is already being edited, do not create a duplicate Auto Draft.
   if(editingBillingHistoryId!==Number(id)) saveBillingAutoDraft("Auto Draft before opening History bill");
   editingBillingHistoryId=Number(id);
-  billingCart=(Array.isArray(item.items)?item.items:[]).map((it,i)=>({id:Number(it.id)||('history-'+item.id+'-'+i),code:String(it.code||''),name:String(it.name||'ITEM'),mrp:Number(it.price ?? it.mrp ?? it.amount)||0,rate:Number(it.rate ?? it.amount ?? it.price)||0,purchase:Number(it.purchase)||0,qty:Number(it.qty)||1,tax:0,discountSelected:false,discountPercent:Number(item.discountPercent||billingDiscountPercent)||billingDiscountPercent}));
-  billingPaymentMode=String(item.paymentMode||'Cash'); billingReceived=Number(item.received)||0;
+  // Restore the exact discount snapshot saved with this bill.
+  // Never use the current/default discount for a historical bill.
+  const savedDiscountPercent = Object.prototype.hasOwnProperty.call(item,'discountPercent')
+    ? Math.min(100,Math.max(0,Number(item.discountPercent)||0))
+    : 0;
+  billingDiscountPercent=savedDiscountPercent;
+  const discountInput=document.getElementById('billing-discount-percent');
+  if(discountInput) discountInput.value=String(savedDiscountPercent);
+  billingCart=(Array.isArray(item.items)?item.items:[]).map((it,i)=>({
+    id:Number(it.id)||('history-'+item.id+'-'+i),
+    code:String(it.code||''),
+    name:String(it.name||'ITEM'),
+    mrp:Number(it.price ?? it.mrp ?? it.amount)||0,
+    rate:Number(it.rate ?? it.amount ?? it.price)||0,
+    purchase:Number(it.purchase)||0,
+    qty:Number(it.qty)||1,
+    tax:0,
+    // Preserve whether the historical item actually had MRP discount applied.
+    discountSelected:Boolean(it.discountSelected),
+    discountPercent:Object.prototype.hasOwnProperty.call(it,'discountPercent')
+      ? Math.min(100,Math.max(0,Number(it.discountPercent)||0))
+      : savedDiscountPercent,
+    _baseSaleRate:it._baseSaleRate!==undefined ? Number(it._baseSaleRate)||0 : undefined
+  }));
+  billingPaymentMode=['Cash','UPI','Credit Card','MDR'].includes(String(item.paymentMode||'')) ? String(item.paymentMode) : 'Cash'; billingReceived=Number(item.received)||0;
   if(Object.prototype.hasOwnProperty.call(item,'paymentOfferMessage')) saveBillingOfferMessage(billingPaymentMode,item.paymentOfferMessage);
   localStorage.setItem('upi-billing-payment-mode',billingPaymentMode); localStorage.setItem('upi-billing-received',String(billingReceived)); saveBillingCart();
-  const upi=String(item.upi||'').trim(); if(upi){ if(typeof billingUpiId!=='undefined'){ billingUpiId=upi; localStorage.setItem('upi-primary-upi-id',upi); } const u=document.getElementById('invoice-upi-input');if(u)u.value=upi;}
+  // Historical invoice data must not overwrite another mode's saved UPI.
+  // Restore the exact per-mode UPI snapshot saved with this bill first; only
+  // fall back to current localStorage for legacy history records.
+  const savedModeUpi=(item && item.paymentModeUpi && typeof item.paymentModeUpi==='object') ? item.paymentModeUpi : null;
+  if(savedModeUpi){
+    billingCashUpi=String(item.cashUpiId ?? savedModeUpi.Cash ?? '').trim();
+    billingUpiId=String(savedModeUpi.UPI||'').trim();
+    billingCreditCardUpi=String(savedModeUpi['Credit Card']||'').trim();
+    billingMdrUpi=String(savedModeUpi.MDR||'').trim();
+  }else{
+    loadBillingModeUpi(billingPaymentMode);
+  }
+  const u=document.getElementById('invoice-upi-input');if(u)u.value=String(item.paymentUpiId||item.upi||getPaymentUpiId()||'');
   const bill=document.getElementById('invoice-bill-input');if(bill)bill.value=String(item.bill||getSavedBillNo('billing'));
   const shop=document.getElementById('invoice-shop-name');if(shop&&item.shop)shop.value=String(item.shop);
   const title=document.getElementById('invoice-title-input');if(title&&item.title)title.value=String(item.title);
@@ -2602,11 +2669,15 @@ function editHistory(id){
     document.getElementById('invoice-shop').textContent=shop;
     document.getElementById('invoice-title').textContent=title;
     document.getElementById('invoice-no').textContent=bill;
+    document.getElementById('invoice-payment').textContent=String(saved.paymentMode||'Cash');
     document.getElementById('invoice-date').textContent=formatInvoiceDateTimeShort(new Date(saved.time||Date.now()));
     const mrpTotal=getInvoiceItems(invoiceCustomizationMode).reduce((sum,it)=>sum+(Number(it.price ?? it.amount)||0)*(Number(it.qty)||0),0);
     const billTotal=getInvoiceItems(invoiceCustomizationMode).reduce((sum,it)=>sum+(Number(it.rate ?? it.amount)||0)*(Number(it.qty)||0),0);
     const discount=Number.isFinite(Number(saved.discount)) ? Number(saved.discount) : Math.max(0,mrpTotal-billTotal);
-    const x={mrpTotal,billTotal,subtotal:mrpTotal,discount,total:billTotal,upi:String(saved.upi||''),paymentMode:String(saved.paymentMode||'Cash'),settingsMode:mode,displaySettings:saved.displaySettings||getInvoiceDisplaySettings(mode)};
+    const savedPaymentMode=String(saved.paymentMode||'Cash');
+    const savedPaymentUpi=String(saved.paymentUpiId||saved.upi||'');
+    const savedDisplaySettings={...(saved.displaySettings||getInvoiceDisplaySettings(mode)),qr:(savedPaymentMode!=='Cash' && isValidUpiId(savedPaymentUpi))};
+    const x={mrpTotal,billTotal,subtotal:mrpTotal,discount,total:billTotal,upi:savedPaymentUpi,paymentMode:savedPaymentMode,settingsMode:mode,displaySettings:savedDisplaySettings};
     setPrinterStatus('Printing saved bill…');
     await writeBluetooth(makeCustomizedReceiptBytes(x));
     setPrinterStatus('Printed successfully','connected');
@@ -2869,6 +2940,15 @@ function escposQr(data){
   const b=utf8(data), size=b.length+3, pL=size&255,pH=(size>>8)&255;
   return concatBytes(new Uint8Array([0x1d,0x28,0x6b,pL,pH,0x31,0x50,0x30]),b,new Uint8Array([0x1d,0x28,0x6b,0x03,0x00,0x31,0x51,0x30]));
 }
+const BILLING_QR_STORAGE_KEY="pos-billing-invoice-qr-enabled";
+const CALCULATOR_QR_STORAGE_KEY="calculator-invoice-qr-enabled";
+function getInvoiceQrStorageKey(mode){
+  return String(mode||invoiceCustomizationMode||"calculator")==="billing" ? BILLING_QR_STORAGE_KEY : CALCULATOR_QR_STORAGE_KEY;
+}
+function getStoredInvoiceQr(mode){
+  return localStorage.getItem(getInvoiceQrStorageKey(mode))!=="false";
+}
+
 function makeReceiptBytes(){
   const amount=getCurrentCalculatorAmount();
   const upi=(upiInput.value.trim()||"");
@@ -2878,12 +2958,13 @@ function makeReceiptBytes(){
   const boldOn=new Uint8Array([0x1b,0x45,0x01]),boldOff=new Uint8Array([0x1b,0x45,0x00]),feed=new Uint8Array([0x1b,0x64,0x04]),cut=new Uint8Array([0x1d,0x56,0x00]);
   const head=utf8(centerText("UPI PAYMENT")+"\n"), body=utf8("--------------------------------\nAmount : Rs "+amount.toFixed(2)+"\nUPI ID : "+upi+"\nTime   : "+now+"\n--------------------------------\n");
   const qrHead=utf8(centerText("SCAN QR TO PAY")+"\n");
-  const qrOn=localStorage.getItem("invoice-qr-enabled")!=="false";
+  const qrOn=getStoredInvoiceQr("calculator");
   const qrPart=qrOn?concatBytes(qrHead,new Uint8Array([0x1d,0x28,0x6b,0x03,0x00,0x31,0x43,0x06]),new Uint8Array([0x1d,0x28,0x6b,0x03,0x00,0x31,0x45,0x30]),escposQr(qr),utf8("\n")):new Uint8Array();
   return concatBytes(init,center,boldOn,head,boldOff,left,body,center,qrPart,feed,cut);
 }
 function toggleInvoiceQR(enabled){
-  localStorage.setItem("invoice-qr-enabled",enabled?"true":"false");
+  const mode=invoiceCustomizationMode==='billing'?'billing':'calculator';
+  localStorage.setItem(getInvoiceQrStorageKey(mode),enabled?"true":"false");
 }
 function getInvoiceSubtotalSafe(){
   if(Array.isArray(getInvoiceItems(invoiceCustomizationMode)) && getInvoiceItems(invoiceCustomizationMode).length){
@@ -3356,7 +3437,9 @@ function openInvoiceCustomizer(mode='calculator'){
   o.classList.add('open');o.setAttribute('aria-hidden','false');
   document.body.classList.add('modal-front-open');
   const editingItem = editingHistoryId!==null ? getHistory(invoiceCustomizationMode==='calculator'?'calculator':'pos').find(h=>Number(h.id)===Number(editingHistoryId)) : null;
-  document.getElementById('invoice-upi-input').value=String(editingItem?.upi|| (invoiceCustomizationMode==='billing' ? getPaymentUpiId() : upiInput.value.trim()) ||'');
+  // Billing Studio always reads the active payment mode's own UPI ID.
+  // Do not let a history item's legacy `upi` field switch/copy another mode's UPI.
+  document.getElementById('invoice-upi-input').value=String(invoiceCustomizationMode==='billing' ? getPaymentUpiId() : (editingItem?.upi||upiInput.value.trim()) ||'');
   document.getElementById('invoice-bill-input').value=String(editingItem?.bill||(invoiceCustomizationMode==='calculator'?(localStorage.getItem('calculator-invoice-current-bill')||''):getSavedBillNo('billing')));
   document.getElementById('invoice-shop-name').value=String(editingItem?.shop||getInvoiceShopName(invoiceCustomizationMode)||document.getElementById('invoice-shop-name').value);
   document.getElementById('invoice-title-input').value=String(editingItem?.title||getInvoiceTitleName(invoiceCustomizationMode)||document.getElementById('invoice-title-input').value);
@@ -3562,7 +3645,7 @@ function invoiceStudioRenderPreview(){
       qrWrap.appendChild(upi);
       target.appendChild(qrWrap);
       try{
-        const payload=(String(x&&x.settingsMode||'')==='billing') ? getBillingQrPayload(Number(x.billTotal??x.total??0),x.upi||'',x.paymentMode||billingPaymentMode) : ('upi://pay?pa='+encodeURIComponent(x.upi||'')+'&am='+Number(x.billTotal??x.total??0).toFixed(2)+'&cu=INR'+(String(localStorage.getItem('upi-offer-message')||'').trim() ? '&tn='+encodeURIComponent(String(localStorage.getItem('upi-offer-message')||'').trim().slice(0,120)) : ''));
+        const payload=(String(x&&x.settingsMode||'')==='billing') ? getBillingQrPayload(Number(x.billTotal??x.total??0),x.upi||'',x.paymentMode||billingPaymentMode) : ('upi://pay?pa='+encodeURIComponent(x.upi||'')+'&am='+Number(x.billTotal??x.total??0).toFixed(2)+'&cu=INR'+(getCalculatorOfferMessage() ? '&tn='+encodeURIComponent(getCalculatorOfferMessage().slice(0,120)) : ''));
         new QRCode(qrBox,{text:payload,width:145,height:145});
       }catch(qrErr){
         qrBox.textContent='QR ERROR';
@@ -3979,7 +4062,7 @@ async function testBluetoothPrinter(){
   }catch(err){setPrinterStatus('Test print failed: '+(err.message||''),'error');}
 }
 window.printPayment=printCurrentPayment;
-window.addEventListener("load",()=>{updateRecycleCount();loadInvoiceDisplaySettings();try{invoiceStudioInit();}catch(e){}syncPhysicalInvoiceQRForPayment();const t=document.getElementById("invoice-qr-toggle");if(t)t.checked=localStorage.getItem("invoice-qr-enabled")!=="false";if(window.AndroidPrinter&&typeof window.AndroidPrinter.print==="function")setPrinterMode("Android printer bridge available");else if(navigator.bluetooth)setPrinterMode("Web Bluetooth / BLE available");else setPrinterMode("Browser Bluetooth unavailable");refreshBillingPrinterStatus();});
+window.addEventListener("load",()=>{updateRecycleCount();loadInvoiceDisplaySettings();try{invoiceStudioInit();}catch(e){}syncPhysicalInvoiceQRForPayment();const t=document.getElementById("invoice-qr-toggle");if(t)t.checked=getStoredInvoiceQr("calculator");if(window.AndroidPrinter&&typeof window.AndroidPrinter.print==="function")setPrinterMode("Android printer bridge available");else if(navigator.bluetooth)setPrinterMode("Web Bluetooth / BLE available");else setPrinterMode("Browser Bluetooth unavailable");refreshBillingPrinterStatus();});
 </script>
 <div id="invoice-print-sheet">
 <div class="invoice-head"><div class="invoice-brand" id="invoice-shop">YOUR SHOP NAME</div><div class="invoice-title" id="invoice-title">PAYMENT INVOICE</div><div class="invoice-subtitle">QUALITY PRODUCTS • BETTER LIVING</div></div>
@@ -4513,8 +4596,12 @@ function renderItemDatabase(){
 }
 document.getElementById("item-db-overlay").addEventListener("click",e=>{if(e.target===e.currentTarget)closeItemDatabase();});
 
-let billingDiscountPercent = Math.min(100, Math.max(0, Number(localStorage.getItem("upi-billing-discount-percent") || 10) || 10));
-let billingPaymentMode = localStorage.getItem("upi-billing-payment-mode") || "Cash";
+const savedBillingDiscountPercent = localStorage.getItem("upi-billing-discount-percent");
+let billingDiscountPercent = savedBillingDiscountPercent === null || savedBillingDiscountPercent === ""
+  ? 10
+  : Math.min(100, Math.max(0, Number(savedBillingDiscountPercent) || 0));
+const savedBillingPaymentMode = String(localStorage.getItem("upi-billing-payment-mode") || "Cash");
+let billingPaymentMode = ['Cash','UPI','Credit Card','MDR'].includes(savedBillingPaymentMode) ? savedBillingPaymentMode : "Cash";
 let billingReceived = Number(localStorage.getItem("upi-billing-received") || 0) || 0;
 function shouldShowInvoiceQRForPayment(mode){
   // Payment mode controls the QR on the PHYSICAL 58mm invoice:
@@ -4525,26 +4612,21 @@ function syncPhysicalInvoiceQRForPayment(){
   const enabled=shouldShowInvoiceQRForPayment(billingPaymentMode);
   const toggle=document.getElementById("invoice-custom-qr");
   if(toggle){toggle.checked=enabled; toggle.disabled=true;}
-  localStorage.setItem("invoice-qr-enabled",enabled?"true":"false");
+  localStorage.setItem(BILLING_QR_STORAGE_KEY,enabled?"true":"false");
 
-  // Payment mode controls BOTH invoice QR visibility and QR destination.
-  // Rebuild the QR immediately so Preview and the physical print sheet never
-  // keep the previous payment mode's UPI ID/amount.
-  try{
-    if(typeof renderPOSInvoice58Preview==="function" &&
-       document.getElementById("pos-invoice-preview-overlay")?.classList.contains("open")){
-      renderPOSInvoice58Preview();
-    }
-  }catch(e){}
+  // This function only updates QR state. The central POS payment-mode sync
+  // function is responsible for rebuilding Preview/Studio exactly once.
   return enabled;
 }
 
 
 const BILLING_UPI_STORAGE_KEYS = Object.freeze({
+  CASH: "upi-cash-upi-id",
   UPI: "upi-primary-upi-id",
   CREDIT_CARD: "upi-credit-card-upi",
   MDR: "upi-mdr-upi"
 });
+let billingCashUpi = String(localStorage.getItem(BILLING_UPI_STORAGE_KEYS.CASH) || "").trim();
 let billingCreditCardUpi = String(localStorage.getItem(BILLING_UPI_STORAGE_KEYS.CREDIT_CARD) || "").trim();
 let billingCreditCardCharge = Math.max(0, Math.min(100, Number(localStorage.getItem("upi-credit-card-charge") || 2.5) || 2.5));
 let billingUpiId = String(localStorage.getItem(BILLING_UPI_STORAGE_KEYS.UPI) || "").trim();
@@ -4554,7 +4636,10 @@ let billingMdrUpi = String(localStorage.getItem(BILLING_UPI_STORAGE_KEYS.MDR) ||
 function persistBillingModeUpi(mode, upi){
   const m=String(mode||"");
   const value=String(upi||"").trim();
-  if(m==='UPI'){
+  if(m==='Cash'){
+    billingCashUpi=value;
+    localStorage.setItem(BILLING_UPI_STORAGE_KEYS.CASH,value);
+  }else if(m==='UPI'){
     billingUpiId=value;
     localStorage.setItem(BILLING_UPI_STORAGE_KEYS.UPI,value);
   }else if(m==='Credit Card'){
@@ -4567,42 +4652,55 @@ function persistBillingModeUpi(mode, upi){
 }
 function loadBillingModeUpi(mode){
   const m=String(mode||billingPaymentMode||'Cash');
-  if(m==='UPI') billingUpiId=String(localStorage.getItem(BILLING_UPI_STORAGE_KEYS.UPI)||'').trim();
+  if(m==='Cash') billingCashUpi=String(localStorage.getItem(BILLING_UPI_STORAGE_KEYS.CASH)||'').trim();
+  else if(m==='UPI') billingUpiId=String(localStorage.getItem(BILLING_UPI_STORAGE_KEYS.UPI)||'').trim();
   else if(m==='Credit Card') billingCreditCardUpi=String(localStorage.getItem(BILLING_UPI_STORAGE_KEYS.CREDIT_CARD)||'').trim();
   else if(m==='MDR') billingMdrUpi=String(localStorage.getItem(BILLING_UPI_STORAGE_KEYS.MDR)||'').trim();
   return getPaymentUpiId();
 }
 
-// POS Billing keeps one Offer / Message for each payment mode.
-// Existing Calculator Offer / Message is used only as the initial default;
-// after that, each POS mode has its own independent saved message.
+// Calculator Offer and POS Billing Offers are completely separate.
+// Billing keeps an independent Offer for each payment mode.
+const CALCULATOR_OFFER_MESSAGE_KEY = "upi-calculator-offer-message";
 const BILLING_OFFER_MESSAGE_KEYS = {
   "Cash":"upi-billing-offer-message-cash",
   "UPI":"upi-billing-offer-message-upi",
   "Credit Card":"upi-billing-offer-message-credit-card",
   "MDR":"upi-billing-offer-message-mdr"
 };
+function getCalculatorOfferMessage(){
+  try {
+    const v=localStorage.getItem(CALCULATOR_OFFER_MESSAGE_KEY);
+    return String(v||'').trim().slice(0,120);
+  } catch(e) { return ''; }
+}
+function saveCalculatorOfferMessage(message, refreshUI){
+  const value=String(message||'').trim().slice(0,120);
+  try { localStorage.setItem(CALCULATOR_OFFER_MESSAGE_KEY,value); } catch(e) {}
+  if(refreshUI){ try { if(typeof updateQR==='function'){ const r=parseFloat(document.getElementById('display-res')?.innerText)||parseFloat(document.getElementById('display-expr')?.value)||0; updateQR(r); } } catch(e) {} }
+  return value;
+}
 function getBillingOfferMessage(mode){
-  const m=String(mode||billingPaymentMode||"Cash");
-  const key=BILLING_OFFER_MESSAGE_KEYS[m];
-  if(!key)return "";
-  let value=localStorage.getItem(key);
-  if(value===null){
-    value=String(localStorage.getItem("upi-offer-message")||"").trim().slice(0,120);
-    localStorage.setItem(key,value);
-  }
-  return String(value||"").trim().slice(0,120);
+  const key=BILLING_OFFER_MESSAGE_KEYS[String(mode||billingPaymentMode||'Cash')] || BILLING_OFFER_MESSAGE_KEYS.Cash;
+  try { return String(localStorage.getItem(key)||'').trim().slice(0,120); } catch(e) { return ''; }
 }
 function saveBillingOfferMessage(mode,message){
-  const m=String(mode||billingPaymentMode||"Cash");
-  const key=BILLING_OFFER_MESSAGE_KEYS[m];
-  if(!key)return;
-  const value=String(message||"").trim().slice(0,120);
-  localStorage.setItem(key,value);
+  const key=BILLING_OFFER_MESSAGE_KEYS[String(mode||'Cash')] || BILLING_OFFER_MESSAGE_KEYS.Cash;
+  try { localStorage.setItem(key,String(message||'').trim().slice(0,120)); } catch(e) {}
 }
-function getBillingPaymentOfferMessage(){
-  return getBillingOfferMessage(billingPaymentMode);
-}
+window.addEventListener('storage', (event) => {
+  if(event.key===CALCULATOR_OFFER_MESSAGE_KEY){
+    const calc=document.getElementById('upi-offer-message');
+    if(calc) calc.value=getCalculatorOfferMessage();
+    try { if(typeof updateQR==='function'){ const r=parseFloat(document.getElementById('display-res')?.innerText)||parseFloat(document.getElementById('display-expr')?.value)||0; updateQR(r); } } catch(e) {}
+  }
+  if(Object.values(BILLING_OFFER_MESSAGE_KEYS).includes(event.key)){
+    const billingEdit=document.getElementById('billing-mode-edit-message');
+    if(billingEdit) billingEdit.value=getBillingOfferMessage(billingPaymentMode);
+    try { if(typeof updateBillingPayment==='function') updateBillingPayment(); } catch(e) {}
+    try { if(typeof renderBillingPayment==='function') renderBillingPayment(); } catch(e) {}
+  }
+});
 function getBillingQrPayload(amount,upi,mode){
   const finalAmount=Math.max(0,Number(amount)||0);
   const cleanUpi=String(upi||"").trim();
@@ -4612,6 +4710,9 @@ function getBillingQrPayload(amount,upi,mode){
   return payload;
 }
 function isMDRPayment(mode){ return String(mode || billingPaymentMode || "Cash") === "MDR"; }
+function getBillingPaymentOfferMessage(){
+  return getBillingOfferMessage(billingPaymentMode);
+}
 function quickEditBillingMode(mode){
   const next=String(mode||"");
   if(!['Cash','UPI','Credit Card','MDR'].includes(next)) return;
@@ -4628,12 +4729,12 @@ function openBillingModeEdit(mode){
   const m=String(mode||'Cash');
   const isCash=m==='Cash', isUpi=m==='UPI', isCard=m==='Credit Card', isMdr=m==='MDR';
   title.textContent=(isCash?'💵 Cash Settings':isUpi?'📱 UPI Settings':isCard?'💳 Credit Card Settings':'🏦 MDR Settings');
-  sub.textContent='Offer / Message is saved separately for this payment mode';
-  const upiValue=isUpi?billingUpiId:isCard?billingCreditCardUpi:isMdr?billingMdrUpi:'';
+  sub.textContent=isCash?'Cash UPI ID + Offer / Message are saved separately for Cash':'Offer / Message is saved separately for this payment mode';
+  const upiValue=isCash?billingCashUpi:isUpi?billingUpiId:isCard?billingCreditCardUpi:isMdr?billingMdrUpi:'';
   const charge=isCard?billingCreditCardCharge:billingMdrCharge;
   const message=getBillingOfferMessage(m);
   body.innerHTML=`
-    ${isCash?'': '<div class="billing-mode-edit-field"><label>QR ID / UPI ID</label><input id="billing-mode-edit-upi" type="text" value="'+escapeHtml(upiValue||'')+'" placeholder="yourname@upi" autocomplete="off" spellcheck="false"></div>'}
+    <div class="billing-mode-edit-field"><label>${isCash?'CASH UPI ID':'QR ID / UPI ID'}</label><input id="billing-mode-edit-upi" type="text" value="${escapeHtml(upiValue||'')}" placeholder="${isCash?'cash@upi':'yourname@upi'}" autocomplete="off" spellcheck="false"></div>
     ${isCash?'':'<div class="billing-mode-edit-field"><label>'+m+' CHARGE / QR SETTING</label>'+(isUpi?'<div class="billing-mode-edit-note" style="margin:0">UPI payment uses the saved UPI ID. No extra charge is added.</div>':'<input id="billing-mode-edit-charge" type="number" min="0" max="100" step="0.01" value="'+Number(charge||0)+'" inputmode="decimal">')+'</div>'}
     <div class="billing-mode-edit-field"><label>Offer / Message (Optional)</label><input id="billing-mode-edit-message" type="text" maxlength="120" value="${escapeHtml(message)}" placeholder="e.g. 🎁 Pay &amp; Get 10% OFF" autocomplete="off" spellcheck="false" aria-label="${escapeHtml(m)} Offer or Message"></div>
     <div class="billing-mode-edit-note">${isCash?'Cash payment message is saved only for Cash.':isUpi?'UPI message is also sent as the QR transaction note (tn).':isCard?'Credit Card message is saved separately for Credit Card.':'MDR message is saved separately for MDR.'}</div>
@@ -4648,16 +4749,16 @@ function closeBillingModeEdit(){
 function saveBillingModeEdit(mode){
   const m=String(mode||'Cash');
   const message=String(document.getElementById('billing-mode-edit-message')?.value||'').trim().slice(0,120);
-  saveBillingOfferMessage(m,message);
   const upi=String(document.getElementById('billing-mode-edit-upi')?.value||'').trim();
   // UPI settings must contain a real UPI ID; otherwise the QR can be silently invalid.
-  if(m!=='Cash' && !isValidUpiId(upi)){
+  if(upi && !isValidUpiId(upi)){
     alert('Please enter a valid UPI ID, e.g. name@bank');
     document.getElementById('billing-mode-edit-upi')?.focus();
     return;
   }
   if(m==='Cash'){
-    // Cash has no QR/UPI setting; only its Offer / Message is stored.
+    persistBillingModeUpi('Cash',upi);
+    const input=document.getElementById('billing-upi-id'); if(input)input.value=billingCashUpi;
   }else if(m==='UPI'){
     persistBillingModeUpi('UPI',upi);
     const input=document.getElementById('billing-upi-id'); if(input)input.value=billingUpiId;
@@ -4678,6 +4779,8 @@ function saveBillingModeEdit(mode){
     persistBillingModeUpi('MDR',billingMdrUpi);
     localStorage.setItem('upi-mdr-charge',String(billingMdrCharge));
   }
+  // Save the validated Offer / Message only for this Billing payment mode.
+  saveBillingOfferMessage(m,message);
   closeBillingModeEdit();
   setBillingPaymentModeQuick(m);
   loadUPISettings(); loadCreditCardSettings(); updateBillingPayment(); renderBillingCart(); renderBillingPayment();
@@ -4694,11 +4797,16 @@ function isUPIPayment(mode){
 }
 function updateUPIDetailsVisibility(){
   const box=document.getElementById("billing-upi-details");
-  if(box) box.style.display=isUPIPayment(billingPaymentMode) ? "" : "none";
+  const show=isUPIPayment(billingPaymentMode) || String(billingPaymentMode||"Cash")==="Cash";
+  if(box) box.style.display=show ? "" : "none";
+  const label=box?.querySelector(".billing-cc-label");
+  if(label) label.textContent=String(billingPaymentMode||"Cash")==="Cash" ? "CASH UPI ID" : "UPI ID";
+  const input=document.getElementById("billing-upi-id");
+  if(input) input.placeholder=String(billingPaymentMode||"Cash")==="Cash" ? "cash@upi" : "yourname@upi";
 }
 function loadUPISettings(){
   const input=document.getElementById("billing-upi-id");
-  if(input) input.value=billingUpiId || "";
+  if(input) input.value=String(billingPaymentMode||"Cash")==="Cash" ? (billingCashUpi||"") : (billingUpiId||"");
   updateUPIDetailsVisibility();
   updateUPISummary();
 }
@@ -4718,7 +4826,8 @@ function saveUPIField(){
   const edit=document.getElementById("billing-upi-id-edit");
   const save=document.getElementById("billing-upi-id-save");
   if(!input)return;
-  persistBillingModeUpi('UPI',String(input.value||""));
+  const activeMode=String(billingPaymentMode||"Cash");
+  persistBillingModeUpi(activeMode,String(input.value||""));
   input.readOnly=true;
   if(edit)edit.style.display="";
   if(save)save.style.display="none";
@@ -4728,9 +4837,11 @@ function saveUPIField(){
 }
 function updateUPISummary(){
   const el=document.getElementById("billing-upi-summary");
-  if(el) el.textContent=isUPIPayment(billingPaymentMode)
-    ? ("UPI ID: "+(billingUpiId||"Not saved")+" • QR payment amount: "+moneyShort(billingTotals().bill))
-    : "";
+  if(el){
+    const cash=String(billingPaymentMode||"Cash")==="Cash";
+    const value=cash?billingCashUpi:billingUpiId;
+    el.textContent=(cash ? "Cash UPI ID: " : "UPI ID: ")+(value||"Not saved")+(cash ? " • QR: OFF for Cash" : " • QR payment amount: "+moneyShort(billingTotals().bill));
+  }
 }
 
 function updateCreditCardDetailsVisibility(){
@@ -4795,6 +4906,9 @@ function updateCreditCardSummary(){
 }
 function getPaymentUpiId(){
   // POS Billing QR uses only POS Billing UPI settings. Never fall back to Calculator QR data.
+  if(String(billingPaymentMode||"Cash") === "Cash"){
+    return String(billingCashUpi || "").trim();
+  }
   if(isCreditCardPayment(billingPaymentMode)){
     return String(billingCreditCardUpi || "").trim();
   }
@@ -4802,7 +4916,7 @@ function getPaymentUpiId(){
     return String(billingUpiId || "").trim();
   }
   if(isMDRPayment(billingPaymentMode)){
-    return String(billingMdrUpi || billingUpiId || "").trim();
+    return String(billingMdrUpi || "").trim();
   }
   return "";
 }
@@ -4843,9 +4957,12 @@ function getBillingPaymentSaleRate(x){
 function syncPOSPaymentModeLiveToInvoiceStudio(){
   if(typeof invoiceCustomizationMode!=='undefined' && invoiceCustomizationMode!=='billing') return;
   try{
+    // Always reload ONLY the active mode's saved UPI before building invoice data.
+    loadBillingModeUpi(billingPaymentMode);
     const activeUpi=String(getPaymentUpiId()||'').trim();
     const upiInputEl=document.getElementById('invoice-upi-input');
     if(upiInputEl) upiInputEl.value=activeUpi;
+    syncPhysicalInvoiceQRForPayment();
     if(typeof syncPOSBillingToInvoice==='function') syncPOSBillingToInvoice();
     if(typeof invoiceStudioRenderPreview==='function') invoiceStudioRenderPreview();
     const preview=document.getElementById('pos-invoice-preview-overlay');
@@ -4868,25 +4985,8 @@ function setBillingPaymentModeQuick(mode){
   const hidden=document.getElementById('billing-payment-mode');
   if(hidden)hidden.value=next;
   localStorage.setItem('upi-billing-payment-mode',next);
-  // Recalculate from the stored base rate so switching modes never compounds charges.
-  billingCart.forEach(x=>{
-    if(x._baseSaleRate==null)x._baseSaleRate=getBillingBaseSaleRate(x);
-    const base=Math.max(0,Number(x._baseSaleRate)||0);
-    x.rate=isCreditCardPayment(next)
-      ? Math.round(base*(1+Math.max(0,Number(billingCreditCardCharge)||0)/100)*100)/100
-      : isMDRPayment(next)
-        ? Math.round(base*(1+Math.max(0,Number(billingMdrCharge)||0)/100)*100)/100
-        : base;
-  });
-  saveBillingCart();
+  // Single payment-mode refresh path. Never render the same state twice.
   updateBillingPayment();
-  updateBillingPaymentModeButtons();
-  updateUPIDetailsVisibility();
-  updateCreditCardDetailsVisibility();
-  syncPhysicalInvoiceQRForPayment();
-  renderBillingCart();
-  renderBillingPayment();
-  syncPOSPaymentModeLiveToInvoiceStudio();
 }
 
 function updateBillingPayment(){
@@ -4914,9 +5014,9 @@ function updateBillingPayment(){
   updateCreditCardDetailsVisibility();
   loadCreditCardSettings();
   localStorage.setItem("upi-billing-received",String(received));
-  syncPhysicalInvoiceQRForPayment();
   renderBillingPayment();
-  try{if(document.getElementById("pos-invoice-preview-overlay")?.classList.contains("open"))renderPOSInvoice58Preview();}catch(e){}
+  // One central downstream sync: Billing -> Studio -> Preview/QR.
+  syncPOSPaymentModeLiveToInvoiceStudio();
 }
 function renderBillingPayment(){
   const mode=document.getElementById("billing-payment-mode"); const rec=document.getElementById("billing-received");
@@ -5140,7 +5240,16 @@ function openBilling(){
   }else{
     try{billingCart=JSON.parse(localStorage.getItem(BILLING_CART_KEY)||"[]");if(!Array.isArray(billingCart))billingCart=[];}catch(e){billingCart=[];}
   }
-  const db=getItemDB(); billingCart=billingCart.map(x=>{const d=db.find(it=>Number(it.id)===Number(x.id)); return {...x,purchase:Number(x.purchase||d?.purchase)||0,discountSelected:Boolean(x.discountSelected),discountPercent:Number(x.discountPercent||billingDiscountPercent)||billingDiscountPercent};});
+  const db=getItemDB(); billingCart=billingCart.map(x=>{
+    const d=db.find(it=>Number(it.id)===Number(x.id));
+    const purchase = x.purchase !== undefined && x.purchase !== null && x.purchase !== ''
+      ? Number(x.purchase) || 0
+      : Number(d?.purchase) || 0;
+    const discountPercent = x.discountPercent !== undefined && x.discountPercent !== null && x.discountPercent !== ''
+      ? Math.min(100, Math.max(0, Number(x.discountPercent) || 0))
+      : billingDiscountPercent;
+    return {...x,purchase,discountSelected:Boolean(x.discountSelected),discountPercent};
+  });
   if(billingCart.length) localStorage.setItem(BILLING_UNFINISHED_KEY,"1"); else localStorage.removeItem(BILLING_UNFINISHED_KEY);
   const currentBill=getSavedBillNo('billing');
   const billInput=document.getElementById('invoice-bill-input');
@@ -5777,11 +5886,12 @@ function clearBillingDiscountSelection(){
 function updateBillingCartField(i,key,val){
   if(!billingCart[i])return;
   // The visible sale-rate field includes the active payment-mode charge.
-  // Convert it back to the stored base rate before saving, so changing
-  // Cash/UPI/Credit Card never applies the charge repeatedly.
-  if(key==="rate" && isCreditCardPayment()){
+  // Convert it back to the stored base rate before saving, so switching
+  // Cash/UPI/Credit Card/MDR never compounds the charge.
+  if(key==="rate" && (isCreditCardPayment() || isMDRPayment())){
     const entered=Math.max(0,Number(val)||0);
-    const factor=1+Math.max(0,Number(billingCreditCardCharge)||0)/100;
+    const charge=isCreditCardPayment() ? Number(billingCreditCardCharge)||0 : Number(billingMdrCharge)||0;
+    const factor=1+Math.max(0,charge)/100;
     const base=factor>0 ? Math.round((entered/factor)*100)/100 : entered;
     billingCart[i]._baseSaleRate=base;
     billingCart[i].rate=base;
@@ -5803,6 +5913,12 @@ function updateBillingCartField(i,key,val){
     return;
   }
   billingCart[i][key]=Number(val)||0;
+  if(key==="mrp" && billingCart[i].discountSelected){
+    // When MRP discount is active, changing MRP must immediately recalculate the discounted base rate.
+    billingCart[i].discountPercent=Math.min(100,Math.max(0,Number(billingCart[i].discountPercent ?? billingDiscountPercent)||0));
+    billingCart[i]._baseSaleRate=Math.round((Number(billingCart[i].mrp)||0)*(1-billingCart[i].discountPercent/100));
+    billingCart[i].rate=billingCart[i]._baseSaleRate;
+  }
   if(key==="rate") {
     billingCart[i].rate=Math.max(0,Math.round(Number(billingCart[i].rate)||0));
     billingCart[i]._baseSaleRate=billingCart[i].rate;
@@ -5841,9 +5957,12 @@ function startNextBillingBill(){
     editingBillingHistoryId=null;
     billingCart=[];
     billingReceived=0;
-    billingPaymentMode=document.getElementById("billing-payment-mode")?.value || billingPaymentMode || "Cash";
+    // Every New/Next Bill starts in Cash mode, while keeping Cash UPI ID saved.
+    billingPaymentMode='Cash';
+    loadBillingModeUpi('Cash');
     localStorage.setItem("upi-billing-received","0");
-    localStorage.setItem("upi-billing-payment-mode",billingPaymentMode);
+    localStorage.setItem("upi-billing-payment-mode","Cash");
+    const nextModeEl=document.getElementById("billing-payment-mode"); if(nextModeEl)nextModeEl.value='Cash';
     saveBillingCart();
     const day=getTodayKey();
     localStorage.setItem(BILL_DAY_KEY,day);
@@ -5880,7 +5999,7 @@ function renderBillingCart(){
     const baseRate=Math.max(0,Number(x._baseSaleRate)||0);
     const eff=getBillingPaymentSaleRate(x); const mrp=Number(x.mrp)||0; const qty=Number(x.qty)||0;
     const name=String(x.name||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
-    const rateDisplay=String(Math.round(eff));
+    const rateDisplay=(isCreditCardPayment() || isMDRPayment()) ? Number(eff).toFixed(2) : String(Math.round(eff));
     const chargeTitle=isCreditCardPayment() ? 'Payment charge '+Number(billingCreditCardCharge||0)+'% included' : isMDRPayment() ? 'MDR charge '+Number(billingMdrCharge||0)+'% included' : 'Sale rate';
     return '<div class="billing-cart-row"><input class="billing-select-box" type="checkbox" '+(selected?'checked':'')+' aria-label="Apply MRP discount" onchange="toggleBillingItemDiscount('+i+',this.checked)"><input class="cart-name cart-name-edit" value="'+name+'" title="Edit item name" oninput="updateBillingCartField('+i+',\'name\',this.value)"><input type="number" min="0" step="0.01" value="'+mrp+'" onchange="updateBillingCartField('+i+',\'mrp\',this.value)"><div class="qty-stepper"><button onclick="changeBillingQty('+i+',-1)">−</button><input type="number" min="0" step="1" value="'+qty+'" onchange="updateBillingCartField('+i+',\'qty\',this.value)"><button onclick="changeBillingQty('+i+',1)">+</button></div><input class="'+(selected?'billing-selected-rate':'')+'" type="number" min="0" step="1" value="'+rateDisplay+'" title="'+chargeTitle+'" '+(selected?'readonly':'onchange="updateBillingCartField('+i+',\'rate\',this.value)"')+'><span>'+moneyShort(eff*qty)+'</span><button class="cart-del" onclick="removeBillingCartItem('+i+')">×</button></div>';
   }).join("");
@@ -5949,7 +6068,7 @@ function saveBillingBillOnly(showAlert=true){
       amount:Math.round(total*100)/100,
       expression:String(document.getElementById('billing-edit-expression')?.value||'').trim()||items.map(it=>String(Number(it.rate)||0)).join('+'),
       upi,bill,shop,title,
-      discount:Math.max(0,mrp-baseTotal),
+      discount:Math.max(0,mrp-baseTotal),discountPercent:Math.min(100,Math.max(0,Number(billingDiscountPercent)||0)),
       displaySettings:getInvoiceDisplaySettings('billing'),
       paymentMode:billingPaymentMode,
       paymentOfferMessage:getBillingPaymentOfferMessage(),
@@ -5957,7 +6076,17 @@ function saveBillingBillOnly(showAlert=true){
       change:Math.max(0,(Number(billingReceived)||0)-total),
       paymentStatus:(Number(billingReceived)||0>=total?'received':'pending'),
       receivedAt:((Number(billingReceived)||0>=total)?new Date().toISOString():null),
-      items:items.map(it=>({name:it.name,price:it.price,rate:it.rate,purchase:Number(it.purchase)||0,qty:it.qty,total:it.total})),
+      paymentUpiId:String(getPaymentUpiId()||''),
+      paymentModeUpi:{Cash:String(billingCashUpi||''),UPI:String(billingUpiId||''),"Credit Card":String(billingCreditCardUpi||''),MDR:String(billingMdrUpi||'')},cashUpiId:String(billingCashUpi||''),
+      paymentModeCharge:{"Credit Card":Number(billingCreditCardCharge)||0,MDR:Number(billingMdrCharge)||0},
+      items:items.map(it=>({
+        id:it.id,code:it.code,name:it.name,price:it.price,rate:it.rate,
+        baseRate:Number(it.baseRate ?? it.originalRate ?? it.rate)||0,
+        purchase:Number(it.purchase)||0,qty:it.qty,total:it.total,
+        discountSelected:Boolean(it.discountSelected),
+        discountPercent:Number(it.discountPercent ?? billingDiscountPercent)||0,
+        _baseSaleRate:it._baseSaleRate!==undefined ? Number(it._baseSaleRate)||0 : undefined
+      })),
       time:new Date().toISOString()
     };
 
@@ -5978,6 +6107,11 @@ function saveBillingBillOnly(showAlert=true){
     localStorage.removeItem(BILLING_CART_KEY);
     localStorage.removeItem(BILLING_UNFINISHED_KEY);
     localStorage.setItem("upi-billing-received","0");
+    // A completed Save Bill always starts the next bill in Cash mode.
+    billingPaymentMode='Cash';
+    localStorage.setItem("upi-billing-payment-mode","Cash");
+    loadBillingModeUpi('Cash');
+    const savedModeEl=document.getElementById('billing-payment-mode'); if(savedModeEl)savedModeEl.value='Cash';
     renderBillingCart();
     renderBillingPayment();
 
@@ -6323,7 +6457,14 @@ function savePOSPrintedHistory(){
   if(total<=0)return false;
   const bill=editingBillingHistoryId!==null ? String(document.getElementById('invoice-bill-input')?.value||getSavedBillNo('billing')).trim() : ensureActiveBillNoUnique('billing');
   const upi=getPaymentUpiId();
-  const h={id:editingBillingHistoryId!==null?Number(editingBillingHistoryId):Date.now(),amount:Math.round(total*100)/100,expression:String(document.getElementById('billing-edit-expression')?.value||'').trim()||items.map(it=>String(Number(it.rate)||0)).join('+'),upi,bill,shop:(getInvoiceShopName('billing')||document.getElementById('invoice-shop-name')?.value||'YOUR SHOP NAME').trim(),title:(document.getElementById('invoice-title-input')?.value||'PAYMENT INVOICE').trim(),discount:Math.max(0,mrp-baseTotal),displaySettings:getInvoiceDisplaySettings('billing'),paymentMode:billingPaymentMode,paymentOfferMessage:getBillingPaymentOfferMessage(),received:Number(billingReceived)||0,change:Math.max(0,(Number(billingReceived)||0)-total),paymentStatus:(Number(billingReceived)||0>=total?'received':'pending'),receivedAt:((Number(billingReceived)||0>=total)?new Date().toISOString():null),items:items.map(it=>({name:it.name,price:it.price,rate:it.rate,purchase:Number(it.purchase)||0,qty:it.qty,total:it.total})),time:new Date().toISOString()};
+  const h={id:editingBillingHistoryId!==null?Number(editingBillingHistoryId):Date.now(),amount:Math.round(total*100)/100,expression:String(document.getElementById('billing-edit-expression')?.value||'').trim()||items.map(it=>String(Number(it.rate)||0)).join('+'),upi,bill,shop:(getInvoiceShopName('billing')||document.getElementById('invoice-shop-name')?.value||'YOUR SHOP NAME').trim(),title:(document.getElementById('invoice-title-input')?.value||'PAYMENT INVOICE').trim(),discount:Math.max(0,mrp-baseTotal),discountPercent:Math.min(100,Math.max(0,Number(billingDiscountPercent)||0)),displaySettings:getInvoiceDisplaySettings('billing'),paymentMode:billingPaymentMode,paymentUpiId:String(getPaymentUpiId()||''),paymentModeUpi:{Cash:String(billingCashUpi||''),UPI:String(billingUpiId||''),"Credit Card":String(billingCreditCardUpi||''),MDR:String(billingMdrUpi||'')},cashUpiId:String(billingCashUpi||''),paymentModeCharge:{"Credit Card":Number(billingCreditCardCharge)||0,MDR:Number(billingMdrCharge)||0},paymentOfferMessage:getBillingPaymentOfferMessage(),received:Number(billingReceived)||0,change:Math.max(0,(Number(billingReceived)||0)-total),paymentStatus:(Number(billingReceived)||0>=total?'received':'pending'),receivedAt:((Number(billingReceived)||0>=total)?new Date().toISOString():null),items:items.map(it=>({
+        id:it.id,code:it.code,name:it.name,price:it.price,rate:it.rate,
+        baseRate:Number(it.baseRate ?? it.originalRate ?? it.rate)||0,
+        purchase:Number(it.purchase)||0,qty:it.qty,total:it.total,
+        discountSelected:Boolean(it.discountSelected),
+        discountPercent:Number(it.discountPercent ?? billingDiscountPercent)||0,
+        _baseSaleRate:it._baseSaleRate!==undefined ? Number(it._baseSaleRate)||0 : undefined
+      })),time:new Date().toISOString()};
   const history=getHistory("pos");
   if(editingBillingHistoryId!==null){const idx=history.findIndex(x=>Number(x.id)===Number(editingBillingHistoryId));if(idx>=0){history[idx]=h;localStorage.setItem(POS_BILLING_HISTORY_KEY,JSON.stringify(history.slice(0,2000)));editingBillingHistoryId=null;return true;}}
   // Do not reject a legitimate bill merely because it has the same number/amount
