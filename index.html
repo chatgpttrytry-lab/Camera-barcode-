@@ -46,7 +46,7 @@ html,body{width:100%;height:100%;overflow:hidden}body{background:var(--bg);color
 .topbar{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;flex:none}.brand{font-size:18px;font-weight:700}.brand span{color:var(--blue)}
 .theme-btn{width:40px;height:40px;border:0;border-radius:50%;background:var(--surface2);color:var(--text);font-size:19px;cursor:pointer}
 .qr-section{padding:4px 18px 8px;display:flex;justify-content:center;flex:none}.qr-card{width:100%;background:var(--blue2);border:1px solid color-mix(in srgb,var(--blue) 18%,transparent);border-radius:22px;padding:12px 16px 10px;display:flex;flex-direction:column;align-items:center;gap:7px}.qr-box{background:#fff;padding:8px;border-radius:14px;line-height:0}.qr-box canvas,.qr-box img{width:128px!important;height:128px!important}.amount-display{font-size:23px;font-weight:700;color:var(--blue)}
-.config-section{padding:0 18px;display:grid;gap:8px;flex:none}.input-group{height:46px;position:relative}.input-group label{position:absolute;left:14px;top:-7px;background:var(--surface);padding:0 5px;font-size:10px;color:var(--muted);font-weight:600;z-index:1}.input-group input{width:100%;height:46px;border:1px solid var(--border);border-radius:14px;background:var(--surface);color:var(--text);padding:0 82px 0 14px;font-size:15px;outline:0}.input-actions{position:absolute;right:8px;top:7px;display:flex;gap:4px}.input-actions .save-icon{position:static;width:32px;height:32px}.qr-select-btn{font-size:18px}.input-group input:focus{border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 12%,transparent)}.save-icon{position:absolute;right:8px;top:7px;width:32px;height:32px;border:0;border-radius:10px;background:var(--blue2);color:var(--blue);font-size:17px}
+.config-section{padding:0 18px;display:grid;gap:8px;flex:none}.input-group{height:46px;position:relative}.input-group label{position:absolute;left:14px;top:-7px;background:var(--surface);padding:0 5px;font-size:10px;color:var(--muted);font-weight:600;z-index:1}.input-group input{width:100%;height:46px;border:1px solid var(--border);border-radius:14px;background:var(--surface);color:var(--text);padding:0 82px 0 14px;font-size:15px;outline:0}.input-group.offer-message-group input{padding-right:14px}.input-actions{position:absolute;right:8px;top:7px;display:flex;gap:4px}.input-actions .save-icon{position:static;width:32px;height:32px}.qr-select-btn{font-size:18px}.input-group input:focus{border-color:var(--blue);box-shadow:0 0 0 3px color-mix(in srgb,var(--blue) 12%,transparent)}.save-icon{position:absolute;right:8px;top:7px;width:32px;height:32px;border:0;border-radius:10px;background:var(--blue2);color:var(--blue);font-size:17px}
 .display-container{padding:8px 22px 3px;text-align:right;display:flex;flex-direction:column;justify-content:flex-end;min-height:72px;flex:1}.expression{font-size:30px;font-weight:500;white-space:normal;overflow-x:hidden;overflow-y:auto;overflow-wrap:anywhere;word-break:break-word;line-height:1.08;max-height:92px;min-height:34px;color:var(--text);scrollbar-width:thin}.result-preview{font-size:15px;color:var(--muted);min-height:18px;margin-top:2px}
 .keypad{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;padding:8px 18px 10px;flex:none}.btn{border:0;outline:0;border-radius:16px;height:clamp(48px,7.5vh,60px);font-size:22px;font-weight:600;cursor:pointer;color:var(--text);background:var(--surface2);transition:transform .08s,filter .1s,background-color .1s,color .1s;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 .keypad .btn{touch-action:manipulation;-webkit-tap-highlight-color:transparent}.keypad .btn.calc-touch-active{background:#16a34a!important;color:#fff!important;transform:scale(.94);filter:brightness(1.08)}
@@ -1055,6 +1055,10 @@ body.home-mode{background:var(--sa-home-bg);align-items:center;overflow:hidden}
                 <button class="save-icon qr-select-btn" onclick="chooseSavedQR()" aria-label="Choose saved QR" title="Choose saved QR">⌄</button>
             </div>
         </div>
+        <div class="input-group offer-message-group">
+            <label>Offer / Message (optional)</label>
+            <input type="text" id="upi-offer-message" value="" maxlength="120" placeholder="e.g. 🎁 Pay &amp; Get 10% OFF" autocomplete="off" spellcheck="false" aria-label="Offer or payment message">
+        </div>
     </div>
 
     <div class="display-container">
@@ -1168,6 +1172,20 @@ body.home-mode{background:var(--sa-home-bg);align-items:center;overflow:hidden}
     displayRes.removeAttribute("tabindex");
     const qrAmountText = document.getElementById("qr-amount");
     const upiInput = document.getElementById("upi-id");
+    const offerMessageInput = document.getElementById("upi-offer-message");
+    
+    // Optional UPI transaction note. This is encoded as the standard UPI `tn` field.
+    // The payment amount remains the calculator result (`am`) and is not changed by the message.
+    try {
+        offerMessageInput.value = localStorage.getItem("upi-offer-message") || "";
+    } catch(e) {}
+    if (offerMessageInput) {
+        offerMessageInput.addEventListener('input', () => {
+            try { localStorage.setItem("upi-offer-message", offerMessageInput.value); } catch(e) {}
+            let currentRes = parseFloat(displayRes.innerText) || parseFloat(expr) || 0;
+            updateQR(currentRes);
+        });
+    }
     
     const qrcode = new QRCode(document.getElementById("qrcode"), {
         text: "upi://pay?pa=&am=0&cu=INR",
@@ -1203,6 +1221,7 @@ function toggleTheme(){
         const upi = upiInput.value.trim();
         if(!isValidUpiId(upi)) { alert("Please enter a valid UPI ID, e.g. name@bank"); return; }
         localStorage.setItem('upi-id', upi);
+        try { localStorage.setItem('upi-offer-message', String(offerMessageInput?.value || '')); } catch(e) {}
 
         const saved = getSavedQRs().filter(x => x.upi !== upi);
         saved.unshift({id: Date.now(), upi, label: "Saved QR"});
@@ -2528,7 +2547,7 @@ function renderHistory(){
           billingBranch.expr=billingInvoiceItemsSourceExpression;
           billingBranch.lastCalculationExpression=billingInvoiceItemsSourceExpression;
           billingBranch.sourceExpression=billingInvoiceItemsSourceExpression;
-          const u=String(item.upi||'').trim(); if(u)upiInput.value=u;
+          const u=String(item.upi||'').trim(); if(u && typeof billingUpiId!=='undefined'){ billingUpiId=u; localStorage.setItem('upi-primary-upi-id',u); }
         }
         document.getElementById('invoice-upi-input').value=item.upi||'';
         return item;
@@ -2541,8 +2560,9 @@ function renderHistory(){
   editingBillingHistoryId=Number(id);
   billingCart=(Array.isArray(item.items)?item.items:[]).map((it,i)=>({id:Number(it.id)||('history-'+item.id+'-'+i),code:String(it.code||''),name:String(it.name||'ITEM'),mrp:Number(it.price ?? it.mrp ?? it.amount)||0,rate:Number(it.rate ?? it.amount ?? it.price)||0,purchase:Number(it.purchase)||0,qty:Number(it.qty)||1,tax:0,discountSelected:false,discountPercent:Number(item.discountPercent||billingDiscountPercent)||billingDiscountPercent}));
   billingPaymentMode=String(item.paymentMode||'Cash'); billingReceived=Number(item.received)||0;
+  if(Object.prototype.hasOwnProperty.call(item,'paymentOfferMessage')) saveBillingOfferMessage(billingPaymentMode,item.paymentOfferMessage);
   localStorage.setItem('upi-billing-payment-mode',billingPaymentMode); localStorage.setItem('upi-billing-received',String(billingReceived)); saveBillingCart();
-  const upi=String(item.upi||'').trim(); if(upi){upiInput.value=upi;const u=document.getElementById('invoice-upi-input');if(u)u.value=upi;}
+  const upi=String(item.upi||'').trim(); if(upi){ if(typeof billingUpiId!=='undefined'){ billingUpiId=upi; localStorage.setItem('upi-primary-upi-id',upi); } const u=document.getElementById('invoice-upi-input');if(u)u.value=upi;}
   const bill=document.getElementById('invoice-bill-input');if(bill)bill.value=String(item.bill||getSavedBillNo('billing'));
   const shop=document.getElementById('invoice-shop-name');if(shop&&item.shop)shop.value=String(item.shop);
   const title=document.getElementById('invoice-title-input');if(title&&item.title)title.value=String(item.title);
@@ -2629,7 +2649,9 @@ function editHistory(id){
         qrAmountText.innerText = "₹ " + finalAmt.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         
         let cleanedUpi = upiInput.value.trim() || "";
+        let offerMessage = String(offerMessageInput?.value || "").trim().slice(0, 120);
         let upiString = `upi://pay?pa=${encodeURIComponent(cleanedUpi)}&am=${finalAmt.toFixed(2)}&cu=INR`;
+        if (offerMessage) upiString += `&tn=${encodeURIComponent(offerMessage)}`;
         
         qrcode.clear();
         qrcode.makeCode(upiString);
@@ -3238,8 +3260,8 @@ function syncCalculatorItemsToInvoice(realTime=false){
 let invoiceEditSnapshot=null;
 let editingHistoryId=null;
 let editingBillingHistoryId=null;
-function captureInvoiceEditSnapshot(mode=invoiceCustomizationMode){const m=mode==='billing'?'billing':'calculator',b=getInvoiceBranch(m);return {mode:m,expr:m==='calculator'?expr:b.expr,lastCalculationExpression:m==='calculator'?lastCalculationExpression:b.lastCalculationExpression,items:JSON.parse(JSON.stringify(getInvoiceItems(m))),source:getInvoiceSourceExpression(m),upi:upiInput.value,shop:document.getElementById("invoice-shop-name").value,title:document.getElementById("invoice-title-input").value,bill:document.getElementById("invoice-bill-input").value,discount:document.getElementById("invoice-discount-input").value,qr:document.getElementById("invoice-custom-qr").checked};}
-function restoreInvoiceEditSnapshot(){if(!invoiceEditSnapshot)return;const m=invoiceEditSnapshot.mode==='billing'?'billing':'calculator',b=getInvoiceBranch(m);b.expr=String(invoiceEditSnapshot.expr??'');b.lastCalculationExpression=String(invoiceEditSnapshot.lastCalculationExpression??'');if(m==='calculator'){expr=invoiceEditSnapshot.expr;lastCalculationExpression=invoiceEditSnapshot.lastCalculationExpression;}setInvoiceItems(JSON.parse(JSON.stringify(invoiceEditSnapshot.items||[])),m);setInvoiceSourceExpression(invoiceEditSnapshot.source,m);upiInput.value=invoiceEditSnapshot.upi;document.getElementById("invoice-shop-name").value=invoiceEditSnapshot.shop;document.getElementById("invoice-title-input").value=invoiceEditSnapshot.title;document.getElementById("invoice-bill-input").value=invoiceEditSnapshot.bill;document.getElementById("invoice-discount-input").value=invoiceEditSnapshot.discount;document.getElementById("invoice-custom-qr").checked=invoiceEditSnapshot.qr;if(m==='calculator')updateDisplay();renderInvoiceItems();updateInvoiceCustomTotal();}
+function captureInvoiceEditSnapshot(mode=invoiceCustomizationMode){const m=mode==='billing'?'billing':'calculator',b=getInvoiceBranch(m);return {mode:m,expr:m==='calculator'?expr:b.expr,lastCalculationExpression:m==='calculator'?lastCalculationExpression:b.lastCalculationExpression,items:JSON.parse(JSON.stringify(getInvoiceItems(m))),source:getInvoiceSourceExpression(m),upi:m==='billing'?getPaymentUpiId():upiInput.value,shop:document.getElementById("invoice-shop-name").value,title:document.getElementById("invoice-title-input").value,bill:document.getElementById("invoice-bill-input").value,discount:document.getElementById("invoice-discount-input").value,qr:document.getElementById("invoice-custom-qr").checked};}
+function restoreInvoiceEditSnapshot(){if(!invoiceEditSnapshot)return;const m=invoiceEditSnapshot.mode==='billing'?'billing':'calculator',b=getInvoiceBranch(m);b.expr=String(invoiceEditSnapshot.expr??'');b.lastCalculationExpression=String(invoiceEditSnapshot.lastCalculationExpression??'');if(m==='calculator'){expr=invoiceEditSnapshot.expr;lastCalculationExpression=invoiceEditSnapshot.lastCalculationExpression;upiInput.value=invoiceEditSnapshot.upi;}else{billingUpiId=String(invoiceEditSnapshot.upi??'').trim();const bu=document.getElementById("invoice-upi-input");if(bu)bu.value=billingUpiId;}setInvoiceItems(JSON.parse(JSON.stringify(invoiceEditSnapshot.items||[])),m);setInvoiceSourceExpression(invoiceEditSnapshot.source,m);document.getElementById("invoice-shop-name").value=invoiceEditSnapshot.shop;document.getElementById("invoice-title-input").value=invoiceEditSnapshot.title;document.getElementById("invoice-bill-input").value=invoiceEditSnapshot.bill;document.getElementById("invoice-discount-input").value=invoiceEditSnapshot.discount;document.getElementById("invoice-custom-qr").checked=invoiceEditSnapshot.qr;if(m==='calculator')updateDisplay();renderInvoiceItems();updateInvoiceCustomTotal();}
 function applyInvoiceCalculationEdit(){
   const input=document.getElementById("invoice-calculation-input"); if(!input)return true;
   const raw=input.value.trim(); if(!raw)return true;
@@ -3323,6 +3345,7 @@ function switchInvoiceCustomizerMode(mode){
 function openInvoiceCustomizer(mode='calculator'){
   document.querySelector('.invoice-custom-window')?.classList.remove('print-tab-active');
   invoiceCustomizationMode=mode==='billing'?'billing':'calculator';
+  if(invoiceCustomizationMode==='billing') loadBillingModeUpi(billingPaymentMode);
   invoiceStudioActiveTemplateId=null; invoiceStudioLastSnapshot=null;
   loadInvoiceDisplaySettings(invoiceCustomizationMode);
   getInvoiceBranch(invoiceCustomizationMode).customization=getInvoiceDisplaySettings(invoiceCustomizationMode);
@@ -3333,7 +3356,7 @@ function openInvoiceCustomizer(mode='calculator'){
   o.classList.add('open');o.setAttribute('aria-hidden','false');
   document.body.classList.add('modal-front-open');
   const editingItem = editingHistoryId!==null ? getHistory(invoiceCustomizationMode==='calculator'?'calculator':'pos').find(h=>Number(h.id)===Number(editingHistoryId)) : null;
-  document.getElementById('invoice-upi-input').value=String(editingItem?.upi||upiInput.value.trim()||'');
+  document.getElementById('invoice-upi-input').value=String(editingItem?.upi|| (invoiceCustomizationMode==='billing' ? getPaymentUpiId() : upiInput.value.trim()) ||'');
   document.getElementById('invoice-bill-input').value=String(editingItem?.bill||(invoiceCustomizationMode==='calculator'?(localStorage.getItem('calculator-invoice-current-bill')||''):getSavedBillNo('billing')));
   document.getElementById('invoice-shop-name').value=String(editingItem?.shop||getInvoiceShopName(invoiceCustomizationMode)||document.getElementById('invoice-shop-name').value);
   document.getElementById('invoice-title-input').value=String(editingItem?.title||getInvoiceTitleName(invoiceCustomizationMode)||document.getElementById('invoice-title-input').value);
@@ -3363,7 +3386,7 @@ function openInvoiceCustomizer(mode='calculator'){
     setInvoiceItems(items.map(x=>({...x})),'billing');
     billingBranch.expr=billingInvoiceItemsSourceExpression||''; billingBranch.lastCalculationExpression=billingInvoiceItemsSourceExpression||'';
     const calcInput=document.getElementById('invoice-calculation-input'); if(calcInput)calcInput.value=getInvoiceExpression('billing')||billingInvoiceItemsSourceExpression||String(items.map(x=>x.rate).join('+'));
-    const up=document.getElementById('invoice-upi-input'); if(up)up.value=getPaymentUpiId()||upiInput.value.trim()||'';
+    const up=document.getElementById('invoice-upi-input'); if(up)up.value=getPaymentUpiId()||'';
   }
   if(invoiceCustomizationMode==='calculator'){
     const currentExpression=getInvoiceExpression('calculator');
@@ -3388,7 +3411,7 @@ function closeInvoiceCustomizer(){
 document.getElementById('invoice-custom-overlay').addEventListener('click',e=>{if(e.target===e.currentTarget)closeInvoiceCustomizer();});
 let invoiceCustomizerLiveTimer=0;
 function scheduleInvoiceCustomizerLiveUpdate(){clearTimeout(invoiceCustomizerLiveTimer);invoiceCustomizerLiveTimer=setTimeout(()=>{try{saveInvoiceSettings(invoiceCustomizationMode);if(invoiceCustomizationMode==='billing')renderPOSInvoice58Preview();else renderCalculatorInvoiceCustomizationPreview();invoiceStudioRenderPreview();}catch(e){console.warn('Invoice customization live update:',e);}},120);}
-['invoice-shop-name','invoice-title-input','invoice-bill-input','invoice-upi-input','invoice-subtitle-input','invoice-footer1-input','invoice-footer2-input','invoice-footer3-input','invoice-show-shop','invoice-show-header','invoice-show-meta','invoice-show-items','invoice-show-summary','invoice-show-payment','invoice-show-upi','invoice-show-footer','invoice-custom-qr'].forEach(id=>{const el=document.getElementById(id);if(el){const ev=el.type==='checkbox'?'change':'input';el.addEventListener(ev,()=>{if(id==='invoice-upi-input')upiInput.value=el.value.trim();scheduleInvoiceCustomizerLiveUpdate();});}});
+['invoice-shop-name','invoice-title-input','invoice-bill-input','invoice-upi-input','invoice-subtitle-input','invoice-footer1-input','invoice-footer2-input','invoice-footer3-input','invoice-show-shop','invoice-show-header','invoice-show-meta','invoice-show-items','invoice-show-summary','invoice-show-payment','invoice-show-upi','invoice-show-footer','invoice-custom-qr'].forEach(id=>{const el=document.getElementById(id);if(el){const ev=el.type==='checkbox'?'change':'input';el.addEventListener(ev,()=>{if(id==='invoice-upi-input'){ if(invoiceCustomizationMode==='billing'){ persistBillingModeUpi(billingPaymentMode,el.value.trim()); } else { upiInput.value=el.value.trim(); } }scheduleInvoiceCustomizerLiveUpdate();});}});
 window.addEventListener('storage',e=>{if(![INVOICE_COMMON_SHOP_KEY,INVOICE_COMMON_TITLE_KEY,INVOICE_COMMON_FOOTER_KEY].includes(e.key))return;try{loadInvoiceDisplaySettings(invoiceCustomizationMode);if(invoiceCustomizationMode==='billing')renderPOSInvoice58Preview();else renderCalculatorInvoiceCustomizationPreview();invoiceStudioRenderPreview();}catch(err){console.warn('Invoice common settings sync:',err);}});
 loadInvoiceDisplaySettings();
 /* ================================================================
@@ -3539,7 +3562,7 @@ function invoiceStudioRenderPreview(){
       qrWrap.appendChild(upi);
       target.appendChild(qrWrap);
       try{
-        const payload='upi://pay?pa='+encodeURIComponent(x.upi||'')+'&am='+Number(x.billTotal??x.total??0).toFixed(2)+'&cu=INR';
+        const payload=(String(x&&x.settingsMode||'')==='billing') ? getBillingQrPayload(Number(x.billTotal??x.total??0),x.upi||'',x.paymentMode||billingPaymentMode) : ('upi://pay?pa='+encodeURIComponent(x.upi||'')+'&am='+Number(x.billTotal??x.total??0).toFixed(2)+'&cu=INR'+(String(localStorage.getItem('upi-offer-message')||'').trim() ? '&tn='+encodeURIComponent(String(localStorage.getItem('upi-offer-message')||'').trim().slice(0,120)) : ''));
         new QRCode(qrBox,{text:payload,width:145,height:145});
       }catch(qrErr){
         qrBox.textContent='QR ERROR';
@@ -3668,8 +3691,9 @@ function formatInvoiceCell(v, forceDecimal=false){
 
 function prepareCustomizedInvoice(){
   if(ensureInvoiceItemsReady()===null)return null;
+  if(invoiceCustomizationMode==='billing') loadBillingModeUpi(billingPaymentMode);
   renderInvoiceItems();
-  const now=new Date(), upi=document.getElementById('invoice-upi-input').value.trim()||upiInput.value.trim()||'';
+  const now=new Date(), upi=(invoiceCustomizationMode==='billing' ? String(getPaymentUpiId()||'').trim() : (document.getElementById('invoice-upi-input').value.trim()||upiInput.value.trim()))||'';
   if(!isValidUpiId(upi)){ alert('Please enter a valid UPI ID, e.g. name@bank'); return null; }
   const mrpTotal=getInvoiceItems(invoiceCustomizationMode).reduce((s,it)=>s+(Number(it.price ?? it.amount)||0)*(Number(it.qty)||0),0);
   const billTotal=getInvoiceItems(invoiceCustomizationMode).reduce((s,it)=>s+(Number(it.rate ?? it.amount)||0)*(Number(it.qty)||0),0);
@@ -3679,8 +3703,7 @@ function prepareCustomizedInvoice(){
   const total=billTotal;
   saveInvoiceSettings(invoiceCustomizationMode);
   snapshotInvoiceBranchCustomization(invoiceCustomizationMode);
-  upiInput.value=upi;
-  localStorage.setItem('upi-id',upi);
+  if(invoiceCustomizationMode==='billing'){ persistBillingModeUpi(billingPaymentMode,upi); } else { upiInput.value=upi; localStorage.setItem('upi-id',upi); }
   const billInput=document.getElementById('invoice-bill-input');
   let bill=String(billInput.value||'').trim();
   if(!bill){ bill=getSavedBillNo(invoiceCustomizationMode); billInput.value=bill; }
@@ -3695,9 +3718,9 @@ function prepareCustomizedInvoice(){
   const tbody=document.getElementById('invoice-items-body');tbody.innerHTML='';
   getInvoiceItems(invoiceCustomizationMode).forEach(it=>{const tr=document.createElement('tr');const price=Number(it.price ?? it.amount)||0;const rate=Number(it.rate ?? it.amount)||0;const qty=Number(it.qty)||0;const total=rate*qty;const name=invoiceStudioCleanName(invoiceStudioNormalizeItemName(it?.name,it),getInvoiceDisplaySettings(invoiceCustomizationMode),32);tr.innerHTML='<td class="invoice-item-name">'+escapeHtml(name)+'</td><td>₹'+formatInvoiceCell(price)+'</td><td>'+formatInvoiceCell(qty)+'</td><td>₹'+formatInvoiceCell(rate)+'</td><td>₹'+formatInvoiceCell(total)+'</td>';tbody.appendChild(tr);});
   
-  const box=document.getElementById('invoice-qr');box.innerHTML='';const on=syncPhysicalInvoiceQRForPayment() && isValidUpiId(upi);document.querySelector('.invoice-scan').style.display=on?'block':'none';if(on)new QRCode(box,{text:'upi://pay?pa='+encodeURIComponent(upi)+'&am='+total.toFixed(2)+'&cu=INR',width:145,height:145});
+  const box=document.getElementById('invoice-qr');box.innerHTML='';const on=syncPhysicalInvoiceQRForPayment() && isValidUpiId(upi);document.querySelector('.invoice-scan').style.display=on?'block':'none';if(on)new QRCode(box,{text:getBillingQrPayload(total,upi,billingPaymentMode),width:145,height:145});
   const displaySettings=getInvoiceDisplaySettings(invoiceCustomizationMode);
-  const result={mrpTotal,billTotal,subtotal:mrpTotal,discount,total,upi,displaySettings,settingsMode:invoiceCustomizationMode==='billing'?'billing':'calculator'};
+  const result={mrpTotal,billTotal,subtotal:mrpTotal,discount,total,upi,paymentMode:invoiceCustomizationMode==='billing'?String(billingPaymentMode||'Cash'):'',displaySettings,settingsMode:invoiceCustomizationMode==='billing'?'billing':'calculator'};
   getInvoiceBranch(invoiceCustomizationMode).invoice={bill,totals:{mrpTotal,billTotal,discount,total},items:JSON.parse(JSON.stringify(getInvoiceItems(invoiceCustomizationMode))),displaySettings:JSON.parse(JSON.stringify(displaySettings))};
   return result;
 }
@@ -3772,7 +3795,7 @@ function saveHistoryItemForInvoice(amount,extra={}){
     id:Date.now(),
     amount:Math.round(amount*100)/100,
     expression:String(extra.expression||getInvoiceExpression('billing')),
-    upi:String(extra.upi||document.getElementById('invoice-upi')?.textContent||upiInput.value||''),
+    upi:String(extra.upi||document.getElementById('invoice-upi')?.textContent||getPaymentUpiId()||''),
     bill:String(extra.bill||document.getElementById('invoice-no')?.textContent||''),
     shop:String(extra.shop||document.getElementById('invoice-shop')?.textContent||''),
     title:String(extra.title||document.getElementById('invoice-title')?.textContent||''),
@@ -3915,8 +3938,8 @@ function makeCustomizedReceiptBytes(x){
   const text=buildPhysicalInvoiceText({...x,displaySettings:st});
   const upi=x.upi||'';
   const init=new Uint8Array([0x1b,0x40]),center=new Uint8Array([0x1b,0x61,0x01]),left=new Uint8Array([0x1b,0x61,0x00]),boldOn=new Uint8Array([0x1b,0x45,0x01]),boldOff=new Uint8Array([0x1b,0x45,0x00]),feed=new Uint8Array([0x1b,0x64,0x05]),cut=new Uint8Array([0x1d,0x56,0x00]);
-  const qr='upi://pay?pa='+encodeURIComponent(upi)+'&am='+Number(x.billTotal??x.total??0).toFixed(2)+'&cu=INR';
-  const qrPart=st.qr?concatBytes(center,utf8('--- SCAN & PAY ---\n'),new Uint8Array([0x1d,0x28,0x6b,0x03,0x00,0x31,0x43,0x06]),new Uint8Array([0x1d,0x28,0x6b,0x03,0x00,0x31,0x45,0x30]),escposQr(qr),utf8('\nUPI ID: '+upi+'\nPay using any UPI app\n')):new Uint8Array();
+  const qr=getBillingQrPayload(Number(x.billTotal??x.total??0),upi,paymentMode);
+  const offerMessage=getBillingOfferMessage(paymentMode); const qrPart=st.qr?concatBytes(center,utf8('--- SCAN & PAY ---\n'),new Uint8Array([0x1d,0x28,0x6b,0x03,0x00,0x31,0x43,0x06]),new Uint8Array([0x1d,0x28,0x6b,0x03,0x00,0x31,0x45,0x30]),escposQr(qr),utf8('\nUPI ID: '+upi+'\n'+(offerMessage?'Offer: '+offerMessage+'\n':'')+'Pay using any UPI app\n')):new Uint8Array();
   /* MRP FIX: Invoice Studio physical preview + Bluetooth print use MRP from it.price/it.mrp and label it MRP. */
   /* Text preview and printer use the same physical text builder. QR remains a real ESC/POS QR on paper. */
   const textNoQr=text.replace(/\n--- SCAN & PAY ---\nUPI ID: .*\nPay using any UPI app\n/,'\n');
@@ -4206,7 +4229,7 @@ window.addEventListener("load",()=>{updateRecycleCount();loadInvoiceDisplaySetti
       <div id="billing-barcode-status" class="billing-barcode-status">Barcode scanner: OFF • Billing works normally</div>
       <div class="billing-payment-mode-row" aria-label="Payment Mode">
          <span class="billing-payment-mode-label">💳 PAYMENT MODE:</span>
-         <div class="billing-mode-group"><button type="button" id="billing-mode-cash" class="billing-mode-btn" onclick="setBillingPaymentModeQuick('Cash')">💵 Cash</button></div>
+         <div class="billing-mode-group"><button type="button" id="billing-mode-cash" class="billing-mode-btn" onclick="setBillingPaymentModeQuick('Cash')">💵 Cash</button><button type="button" class="billing-mode-edit-btn" onclick="quickEditBillingMode('Cash')" aria-label="Edit Cash" title="Edit Cash Offer / Message">✏️</button></div>
          <div class="billing-mode-group"><button type="button" id="billing-mode-upi" class="billing-mode-btn" onclick="setBillingPaymentModeQuick('UPI')">📱 UPI</button><button type="button" class="billing-mode-edit-btn" onclick="quickEditBillingMode('UPI')" aria-label="Edit UPI" title="Edit UPI">✏️</button></div>
          <div class="billing-mode-group"><button type="button" id="billing-mode-card" class="billing-mode-btn" onclick="setBillingPaymentModeQuick('Credit Card')">💳 Credit Card</button><button type="button" class="billing-mode-edit-btn" onclick="quickEditBillingMode('Credit Card')" aria-label="Edit Credit Card" title="Edit Credit Card">✏️</button></div>
          <div class="billing-mode-group"><button type="button" id="billing-mode-mdr" class="billing-mode-btn" onclick="setBillingPaymentModeQuick('MDR')">🏦 MDR</button><button type="button" class="billing-mode-edit-btn" onclick="quickEditBillingMode('MDR')" aria-label="Edit MDR" title="Edit MDR">✏️</button></div>
@@ -4312,7 +4335,7 @@ function saveBillingAutoDraft(reason="Auto Draft"){
     const t=billingTotals();
     const drafts=getBillingDrafts();
     const currentBill=String(document.getElementById("invoice-bill-input")?.value||getSavedBillNo("billing")||"").trim();
-    const draft={id:Date.now(),bill:reason+(currentBill?" • "+currentBill:""),time:new Date().toISOString(),total:t.bill,items:billingCart.map(x=>({...x})),paymentMode:billingPaymentMode,received:billingReceived,auto:true,reason:String(reason)};
+    const draft={id:Date.now(),bill:reason+(currentBill?" • "+currentBill:""),time:new Date().toISOString(),total:t.bill,items:billingCart.map(x=>({...x})),paymentMode:billingPaymentMode,paymentOfferMessage:getBillingPaymentOfferMessage(),received:billingReceived,auto:true,reason:String(reason)};
     drafts.unshift(draft); saveBillingDrafts(drafts);
     return draft;
   }catch(e){return null;}
@@ -4322,6 +4345,7 @@ function loadBillingDraft(id){
   saveBillingAutoDraft("Auto Draft before opening saved draft");
   billingCart=Array.isArray(d.items)?d.items.map(x=>({...x})):[];
   billingPaymentMode=d.paymentMode||"Cash";billingReceived=Number(d.received)||0;
+  if(Object.prototype.hasOwnProperty.call(d,'paymentOfferMessage')) saveBillingOfferMessage(billingPaymentMode,d.paymentOfferMessage);
   saveBillingCart();localStorage.setItem("upi-billing-payment-mode",billingPaymentMode);localStorage.setItem("upi-billing-received",String(billingReceived));
   closeBillingDrafts();renderBillingCart();renderBillingPayment();alert("Saved bill opened.");
 }
@@ -4516,15 +4540,81 @@ function syncPhysicalInvoiceQRForPayment(){
 }
 
 
-let billingCreditCardUpi = localStorage.getItem("upi-credit-card-upi") || "";
+const BILLING_UPI_STORAGE_KEYS = Object.freeze({
+  UPI: "upi-primary-upi-id",
+  CREDIT_CARD: "upi-credit-card-upi",
+  MDR: "upi-mdr-upi"
+});
+let billingCreditCardUpi = String(localStorage.getItem(BILLING_UPI_STORAGE_KEYS.CREDIT_CARD) || "").trim();
 let billingCreditCardCharge = Math.max(0, Math.min(100, Number(localStorage.getItem("upi-credit-card-charge") || 2.5) || 2.5));
-let billingUpiId = localStorage.getItem("upi-primary-upi-id") || "";
+let billingUpiId = String(localStorage.getItem(BILLING_UPI_STORAGE_KEYS.UPI) || "").trim();
 let billingMdrCharge = Math.max(0, Math.min(100, Number(localStorage.getItem("upi-mdr-charge") || 0) || 0));
-let billingMdrUpi = localStorage.getItem("upi-mdr-upi") || "";
+let billingMdrUpi = String(localStorage.getItem(BILLING_UPI_STORAGE_KEYS.MDR) || "").trim();
+
+function persistBillingModeUpi(mode, upi){
+  const m=String(mode||"");
+  const value=String(upi||"").trim();
+  if(m==='UPI'){
+    billingUpiId=value;
+    localStorage.setItem(BILLING_UPI_STORAGE_KEYS.UPI,value);
+  }else if(m==='Credit Card'){
+    billingCreditCardUpi=value;
+    localStorage.setItem(BILLING_UPI_STORAGE_KEYS.CREDIT_CARD,value);
+  }else if(m==='MDR'){
+    billingMdrUpi=value;
+    localStorage.setItem(BILLING_UPI_STORAGE_KEYS.MDR,value);
+  }
+}
+function loadBillingModeUpi(mode){
+  const m=String(mode||billingPaymentMode||'Cash');
+  if(m==='UPI') billingUpiId=String(localStorage.getItem(BILLING_UPI_STORAGE_KEYS.UPI)||'').trim();
+  else if(m==='Credit Card') billingCreditCardUpi=String(localStorage.getItem(BILLING_UPI_STORAGE_KEYS.CREDIT_CARD)||'').trim();
+  else if(m==='MDR') billingMdrUpi=String(localStorage.getItem(BILLING_UPI_STORAGE_KEYS.MDR)||'').trim();
+  return getPaymentUpiId();
+}
+
+// POS Billing keeps one Offer / Message for each payment mode.
+// Existing Calculator Offer / Message is used only as the initial default;
+// after that, each POS mode has its own independent saved message.
+const BILLING_OFFER_MESSAGE_KEYS = {
+  "Cash":"upi-billing-offer-message-cash",
+  "UPI":"upi-billing-offer-message-upi",
+  "Credit Card":"upi-billing-offer-message-credit-card",
+  "MDR":"upi-billing-offer-message-mdr"
+};
+function getBillingOfferMessage(mode){
+  const m=String(mode||billingPaymentMode||"Cash");
+  const key=BILLING_OFFER_MESSAGE_KEYS[m];
+  if(!key)return "";
+  let value=localStorage.getItem(key);
+  if(value===null){
+    value=String(localStorage.getItem("upi-offer-message")||"").trim().slice(0,120);
+    localStorage.setItem(key,value);
+  }
+  return String(value||"").trim().slice(0,120);
+}
+function saveBillingOfferMessage(mode,message){
+  const m=String(mode||billingPaymentMode||"Cash");
+  const key=BILLING_OFFER_MESSAGE_KEYS[m];
+  if(!key)return;
+  const value=String(message||"").trim().slice(0,120);
+  localStorage.setItem(key,value);
+}
+function getBillingPaymentOfferMessage(){
+  return getBillingOfferMessage(billingPaymentMode);
+}
+function getBillingQrPayload(amount,upi,mode){
+  const finalAmount=Math.max(0,Number(amount)||0);
+  const cleanUpi=String(upi||"").trim();
+  let payload="upi://pay?pa="+encodeURIComponent(cleanUpi)+"&am="+finalAmount.toFixed(2)+"&cu=INR";
+  const message=getBillingOfferMessage(mode);
+  if(message)payload+="&tn="+encodeURIComponent(message);
+  return payload;
+}
 function isMDRPayment(mode){ return String(mode || billingPaymentMode || "Cash") === "MDR"; }
 function quickEditBillingMode(mode){
   const next=String(mode||"");
-  if(!['UPI','Credit Card','MDR'].includes(next)) return;
+  if(!['Cash','UPI','Credit Card','MDR'].includes(next)) return;
   // Opening Settings must not silently change the active payment mode.
   // The mode changes only when the user taps the actual payment-mode button.
   openBillingModeEdit(next);
@@ -4535,16 +4625,18 @@ function openBillingModeEdit(mode){
   const sub=document.getElementById('billing-mode-edit-sub');
   const body=document.getElementById('billing-mode-edit-body');
   if(!overlay||!body)return;
-  const m=String(mode||'UPI');
-  const isCard=m==='Credit Card', isMdr=m==='MDR';
-  title.textContent=(m==='UPI'?'📱 UPI Settings':isCard?'💳 Credit Card Settings':'🏦 MDR Settings');
-  sub.textContent='Edit settings here and tap Save';
-  const upiValue=m==='UPI'?billingUpiId:isCard?billingCreditCardUpi:billingMdrUpi;
+  const m=String(mode||'Cash');
+  const isCash=m==='Cash', isUpi=m==='UPI', isCard=m==='Credit Card', isMdr=m==='MDR';
+  title.textContent=(isCash?'💵 Cash Settings':isUpi?'📱 UPI Settings':isCard?'💳 Credit Card Settings':'🏦 MDR Settings');
+  sub.textContent='Offer / Message is saved separately for this payment mode';
+  const upiValue=isUpi?billingUpiId:isCard?billingCreditCardUpi:isMdr?billingMdrUpi:'';
   const charge=isCard?billingCreditCardCharge:billingMdrCharge;
+  const message=getBillingOfferMessage(m);
   body.innerHTML=`
-    <div class="billing-mode-edit-field"><label>QR ID / UPI ID</label><input id="billing-mode-edit-upi" type="text" value="${escapeHtml(upiValue||'')}" placeholder="yourname@upi" autocomplete="off" spellcheck="false"></div>
-    ${m==='UPI'?'':'<div class="billing-mode-edit-field"><label>'+m+' CHARGE (%)</label><input id="billing-mode-edit-charge" type="number" min="0" max="100" step="0.01" value="'+Number(charge||0)+'" inputmode="decimal"></div>'}
-    <div class="billing-mode-edit-note">${m==='UPI'?'This UPI ID is used for the '+m+' QR payment.':isCard?'Credit Card charge is automatically added to the sale rate, same as before.':'MDR charge works like Credit Card charge: the percentage is automatically added to each product sale rate. The charge is calculated from the original sale rate and never compounds.'}</div>
+    ${isCash?'': '<div class="billing-mode-edit-field"><label>QR ID / UPI ID</label><input id="billing-mode-edit-upi" type="text" value="'+escapeHtml(upiValue||'')+'" placeholder="yourname@upi" autocomplete="off" spellcheck="false"></div>'}
+    ${isCash?'':'<div class="billing-mode-edit-field"><label>'+m+' CHARGE / QR SETTING</label>'+(isUpi?'<div class="billing-mode-edit-note" style="margin:0">UPI payment uses the saved UPI ID. No extra charge is added.</div>':'<input id="billing-mode-edit-charge" type="number" min="0" max="100" step="0.01" value="'+Number(charge||0)+'" inputmode="decimal">')+'</div>'}
+    <div class="billing-mode-edit-field"><label>Offer / Message (Optional)</label><input id="billing-mode-edit-message" type="text" maxlength="120" value="${escapeHtml(message)}" placeholder="e.g. 🎁 Pay &amp; Get 10% OFF" autocomplete="off" spellcheck="false" aria-label="${escapeHtml(m)} Offer or Message"></div>
+    <div class="billing-mode-edit-note">${isCash?'Cash payment message is saved only for Cash.':isUpi?'UPI message is also sent as the QR transaction note (tn).':isCard?'Credit Card message is saved separately for Credit Card.':'MDR message is saved separately for MDR.'}</div>
     <div class="billing-mode-edit-actions"><button type="button" class="billing-mode-edit-cancel" onclick="closeBillingModeEdit()">Cancel</button><button type="button" class="billing-mode-edit-save" onclick="saveBillingModeEdit('${m}')">💾 Save</button></div>`;
   overlay.classList.add('open'); overlay.setAttribute('aria-hidden','false');
   setTimeout(()=>document.getElementById('billing-mode-edit-upi')?.focus(),50);
@@ -4554,35 +4646,36 @@ function closeBillingModeEdit(){
   if(overlay){overlay.classList.remove('open');overlay.setAttribute('aria-hidden','true');}
 }
 function saveBillingModeEdit(mode){
-  const m=String(mode||'UPI');
+  const m=String(mode||'Cash');
+  const message=String(document.getElementById('billing-mode-edit-message')?.value||'').trim().slice(0,120);
+  saveBillingOfferMessage(m,message);
   const upi=String(document.getElementById('billing-mode-edit-upi')?.value||'').trim();
   // UPI settings must contain a real UPI ID; otherwise the QR can be silently invalid.
-  if(m==='UPI' && !isValidUpiId(upi)){
+  if(m!=='Cash' && !isValidUpiId(upi)){
     alert('Please enter a valid UPI ID, e.g. name@bank');
     document.getElementById('billing-mode-edit-upi')?.focus();
     return;
   }
-  if(m==='UPI'){
-    billingUpiId=upi;
-    localStorage.setItem('upi-primary-upi-id',billingUpiId);
-    localStorage.setItem('upi-id',billingUpiId);
+  if(m==='Cash'){
+    // Cash has no QR/UPI setting; only its Offer / Message is stored.
+  }else if(m==='UPI'){
+    persistBillingModeUpi('UPI',upi);
     const input=document.getElementById('billing-upi-id'); if(input)input.value=billingUpiId;
-    try{if(typeof upiInput!=='undefined'&&upiInput)upiInput.value=billingUpiId;}catch(e){}
   }else if(m==='Credit Card'){
     if(upi && !isValidUpiId(upi)){alert('Please enter a valid QR / UPI ID, e.g. name@bank');document.getElementById('billing-mode-edit-upi')?.focus();return;}
-    billingCreditCardUpi=upi;
+    persistBillingModeUpi('Credit Card',upi);
     const raw=Number(document.getElementById('billing-mode-edit-charge')?.value);
     if(!Number.isFinite(raw)||raw<0||raw>100){alert('Enter charge between 0 and 100%.');return;}
     billingCreditCardCharge=Math.round(raw*100)/100;
-    localStorage.setItem('upi-credit-card-upi',billingCreditCardUpi);
+    persistBillingModeUpi('Credit Card',billingCreditCardUpi);
     localStorage.setItem('upi-credit-card-charge',String(billingCreditCardCharge));
   }else if(m==='MDR'){
     if(upi && !isValidUpiId(upi)){alert('Please enter a valid QR / UPI ID, e.g. name@bank');document.getElementById('billing-mode-edit-upi')?.focus();return;}
-    billingMdrUpi=upi;
+    persistBillingModeUpi('MDR',upi);
     const raw=Number(document.getElementById('billing-mode-edit-charge')?.value);
     if(!Number.isFinite(raw)||raw<0||raw>100){alert('Enter MDR charge between 0 and 100%.');return;}
     billingMdrCharge=Math.round(raw*100)/100;
-    localStorage.setItem('upi-mdr-upi',billingMdrUpi);
+    persistBillingModeUpi('MDR',billingMdrUpi);
     localStorage.setItem('upi-mdr-charge',String(billingMdrCharge));
   }
   closeBillingModeEdit();
@@ -4605,7 +4698,7 @@ function updateUPIDetailsVisibility(){
 }
 function loadUPISettings(){
   const input=document.getElementById("billing-upi-id");
-  if(input) input.value=billingUpiId || (typeof upiInput!=="undefined" ? String(upiInput.value||"").trim() : "");
+  if(input) input.value=billingUpiId || "";
   updateUPIDetailsVisibility();
   updateUPISummary();
 }
@@ -4625,12 +4718,7 @@ function saveUPIField(){
   const edit=document.getElementById("billing-upi-id-edit");
   const save=document.getElementById("billing-upi-id-save");
   if(!input)return;
-  billingUpiId=String(input.value||"").trim();
-  localStorage.setItem("upi-primary-upi-id",billingUpiId);
-  try{
-    if(typeof upiInput!=="undefined" && upiInput) upiInput.value=billingUpiId;
-    localStorage.setItem("upi-id",billingUpiId);
-  }catch(e){}
+  persistBillingModeUpi('UPI',String(input.value||""));
   input.readOnly=true;
   if(edit)edit.style.display="";
   if(save)save.style.display="none";
@@ -4677,8 +4765,13 @@ function saveCreditCardField(which){
   const save=document.getElementById(id+"-save");
   if(!input)return;
   if(which==="upi"){
-    billingCreditCardUpi=String(input.value||"").trim();
-    localStorage.setItem("upi-credit-card-upi",billingCreditCardUpi);
+    const value=String(input.value||"").trim();
+    if(!isValidUpiId(value)){
+      alert('Please enter a valid UPI ID, e.g. creditcard@upi');
+      input.focus();
+      return;
+    }
+    persistBillingModeUpi('Credit Card',value);
   }else{
     billingCreditCardCharge=Math.max(0,Math.min(100,Number(input.value)||0));
     input.value=String(billingCreditCardCharge);
@@ -4701,19 +4794,17 @@ function updateCreditCardSummary(){
     : "";
 }
 function getPaymentUpiId(){
-  // Billing PAYMENT mode is the source of truth for the invoice QR.
-  // UPI -> Billing UPI ID; Credit Card -> Credit Card UPI ID.
-  // Cash -> QR is disabled, so its fallback value is irrelevant.
+  // POS Billing QR uses only POS Billing UPI settings. Never fall back to Calculator QR data.
   if(isCreditCardPayment(billingPaymentMode)){
-    return String(billingCreditCardUpi || (document.getElementById("invoice-upi-input")?.value || upiInput?.value || "")).trim();
+    return String(billingCreditCardUpi || "").trim();
   }
   if(isUPIPayment(billingPaymentMode)){
-    return String(billingUpiId || (document.getElementById("invoice-upi-input")?.value || upiInput?.value || "")).trim();
+    return String(billingUpiId || "").trim();
   }
   if(isMDRPayment(billingPaymentMode)){
-    return String(billingMdrUpi || billingUpiId || (document.getElementById("invoice-upi-input")?.value || upiInput?.value || "")).trim();
+    return String(billingMdrUpi || billingUpiId || "").trim();
   }
-  return String(document.getElementById("invoice-upi-input")?.value || upiInput?.value || "").trim();
+  return "";
 }
 function getCreditCardChargeAmount(base){
   return isCreditCardPayment(billingPaymentMode)
@@ -4749,6 +4840,19 @@ function getBillingPaymentSaleRate(x){
 }
 
 
+function syncPOSPaymentModeLiveToInvoiceStudio(){
+  if(typeof invoiceCustomizationMode!=='undefined' && invoiceCustomizationMode!=='billing') return;
+  try{
+    const activeUpi=String(getPaymentUpiId()||'').trim();
+    const upiInputEl=document.getElementById('invoice-upi-input');
+    if(upiInputEl) upiInputEl.value=activeUpi;
+    if(typeof syncPOSBillingToInvoice==='function') syncPOSBillingToInvoice();
+    if(typeof invoiceStudioRenderPreview==='function') invoiceStudioRenderPreview();
+    const preview=document.getElementById('pos-invoice-preview-overlay');
+    if(preview?.classList.contains('open') && typeof renderPOSInvoice58Preview==='function') renderPOSInvoice58Preview();
+  }catch(e){console.warn('POS payment-mode live sync:',e);}
+}
+
 function updateBillingPaymentModeButtons(){
   const mode=String(billingPaymentMode||'Cash');
   [['Cash','billing-mode-cash'],['UPI','billing-mode-upi'],['Credit Card','billing-mode-card'],['MDR','billing-mode-mdr']].forEach(([name,id])=>{
@@ -4760,6 +4864,7 @@ function setBillingPaymentModeQuick(mode){
   const next=String(mode||'Cash');
   if(!['Cash','UPI','Credit Card','MDR'].includes(next))return;
   billingPaymentMode=next;
+  loadBillingModeUpi(next);
   const hidden=document.getElementById('billing-payment-mode');
   if(hidden)hidden.value=next;
   localStorage.setItem('upi-billing-payment-mode',next);
@@ -4781,7 +4886,7 @@ function setBillingPaymentModeQuick(mode){
   syncPhysicalInvoiceQRForPayment();
   renderBillingCart();
   renderBillingPayment();
-  try{if(document.getElementById('pos-invoice-preview-overlay')?.classList.contains('open'))renderPOSInvoice58Preview();}catch(e){}
+  syncPOSPaymentModeLiveToInvoiceStudio();
 }
 
 function updateBillingPayment(){
@@ -5814,7 +5919,7 @@ function saveBillingDraft(){
   saveBillingCart();
   const t=billingTotals();
   const drafts=getBillingDrafts();
-  const draft={id:Date.now(),bill:'Draft '+String(drafts.length+1).padStart(3,'0'),time:new Date().toISOString(),total:t.bill,items:billingCart.map(x=>({...x})),paymentMode:billingPaymentMode,received:billingReceived};
+  const draft={id:Date.now(),bill:'Draft '+String(drafts.length+1).padStart(3,'0'),time:new Date().toISOString(),total:t.bill,items:billingCart.map(x=>({...x})),paymentMode:billingPaymentMode,paymentOfferMessage:getBillingPaymentOfferMessage(),received:billingReceived};
   drafts.unshift(draft); saveBillingDrafts(drafts);
   alert('Bill draft saved. Total: '+moneyShort(t.bill));
 }
@@ -5847,6 +5952,7 @@ function saveBillingBillOnly(showAlert=true){
       discount:Math.max(0,mrp-baseTotal),
       displaySettings:getInvoiceDisplaySettings('billing'),
       paymentMode:billingPaymentMode,
+      paymentOfferMessage:getBillingPaymentOfferMessage(),
       received:Number(billingReceived)||0,
       change:Math.max(0,(Number(billingReceived)||0)-total),
       paymentStatus:(Number(billingReceived)||0>=total?'received':'pending'),
@@ -6179,10 +6285,10 @@ function renderPOSInvoice58Preview(){
   if(st.summary){html+='<div class="r58-sep">================================</div><div class="r58-summary"><div><span>MRP TOTAL</span><b>'+esc(money(mrp))+'</b></div>';if(discount>0.000001)html+='<div><span>DISCOUNT</span><b>'+esc(money(discount))+'</b></div>';html+='<div class="payable"><span>PAYABLE</span><b>'+esc(money(total))+'</b></div></div>';}
   if(st.payment){html+='<div class="r58-payment"><div><b>PAYMENT</b><span>'+esc(payment)+'</span></div>';if(Number(billingReceived)>0)html+='<div><b>'+esc(billingReceived>=total?'CHANGE':'DUE')+'</b><span>'+esc(money(Math.abs(billingReceived-total)))+'</span></div>';html+='</div>';}
   if(st.upi && qrVisible)html+='<div class="r58-payment"><div><b>UPI</b><span>'+esc(upi)+'</span></div></div>';
-  if(st.qr){html+='<div class="r58-qr"><div id="pos-preview-qr"></div><b>SCAN &amp; PAY</b><small>UPI ID: '+esc(upi)+'</small><small>Pay using any UPI app</small></div>';}
+  if(st.qr){const offer=getBillingPaymentOfferMessage();html+='<div class="r58-qr"><div id="pos-preview-qr"></div><b>SCAN &amp; PAY</b><small>UPI ID: '+esc(upi)+'</small>'+(offer?'<small>💬 '+esc(offer)+'</small>':'')+'<small>Pay using any UPI app</small></div>';}
   if(st.footer)html+='<div class="r58-foot"><b>'+esc(st.footer1)+'</b><strong>'+esc(st.footer2)+'</strong><span>'+esc(st.footer3)+'</span></div>';
   box.innerHTML=html;
-  if(st.qr){const q=document.getElementById('pos-preview-qr');if(q&&typeof QRCode!=='undefined')new QRCode(q,{text:'upi://pay?pa='+encodeURIComponent(upi)+'&am='+Number(total).toFixed(2)+'&cu=INR',width:78,height:78});}
+  if(st.qr){const q=document.getElementById('pos-preview-qr');if(q&&typeof QRCode!=='undefined')new QRCode(q,{text:getBillingQrPayload(total,upi,billingPaymentMode),width:78,height:78});}
   const printShop=document.getElementById('invoice-shop'),printTitle=document.getElementById('invoice-title'),printNo=document.getElementById('invoice-no'),printDate=document.getElementById('invoice-date'),printPayment=document.getElementById('invoice-payment');
   if(printShop)printShop.textContent=shop;if(printTitle)printTitle.textContent=title;if(printNo)printNo.textContent=bill;if(printDate)printDate.textContent=dt;if(printPayment)printPayment.textContent=payment;
   const sub=document.getElementById('invoice-subtotal'),disc=document.getElementById('invoice-discount'),amt=document.getElementById('invoice-amount'),up=document.getElementById('invoice-upi'),qrUp=document.getElementById('invoice-qr-upi');if(sub)sub.textContent=money(mrp);if(disc)disc.textContent=money(discount);if(amt)amt.textContent=money(total);if(up)up.textContent=upi;if(qrUp)qrUp.textContent='UPI ID: '+upi;
@@ -6198,7 +6304,7 @@ function renderPOSInvoice58Preview(){
   if(st.subtitle){let el=document.querySelector('.invoice-subtitle');if(el)el.textContent=st.subtitle;}
   const foot=document.querySelector('.invoice-foot');if(foot)foot.innerHTML=st.footer1+'<br>'+st.footer2+(st.footer3?'<br>'+st.footer3:'');
   
-  const qrBox=document.getElementById('invoice-qr');if(qrBox){qrBox.innerHTML='';if(st.qr&&typeof QRCode!=='undefined')new QRCode(qrBox,{text:'upi://pay?pa='+encodeURIComponent(upi)+'&am='+Number(total).toFixed(2)+'&cu=INR',width:82,height:82});}
+  const qrBox=document.getElementById('invoice-qr');if(qrBox){qrBox.innerHTML='';if(st.qr&&typeof QRCode!=='undefined')new QRCode(qrBox,{text:getBillingQrPayload(Number(total),upi,billingPaymentMode),width:82,height:82});}
 }
 function editPOSInvoiceFromPreview(){
   const saved=getBillingItemsState().map(it=>({...it}));
@@ -6217,7 +6323,7 @@ function savePOSPrintedHistory(){
   if(total<=0)return false;
   const bill=editingBillingHistoryId!==null ? String(document.getElementById('invoice-bill-input')?.value||getSavedBillNo('billing')).trim() : ensureActiveBillNoUnique('billing');
   const upi=getPaymentUpiId();
-  const h={id:editingBillingHistoryId!==null?Number(editingBillingHistoryId):Date.now(),amount:Math.round(total*100)/100,expression:String(document.getElementById('billing-edit-expression')?.value||'').trim()||items.map(it=>String(Number(it.rate)||0)).join('+'),upi,bill,shop:(getInvoiceShopName('billing')||document.getElementById('invoice-shop-name')?.value||'YOUR SHOP NAME').trim(),title:(document.getElementById('invoice-title-input')?.value||'PAYMENT INVOICE').trim(),discount:Math.max(0,mrp-baseTotal),displaySettings:getInvoiceDisplaySettings('billing'),paymentMode:billingPaymentMode,received:Number(billingReceived)||0,change:Math.max(0,(Number(billingReceived)||0)-total),paymentStatus:(Number(billingReceived)||0>=total?'received':'pending'),receivedAt:((Number(billingReceived)||0>=total)?new Date().toISOString():null),items:items.map(it=>({name:it.name,price:it.price,rate:it.rate,purchase:Number(it.purchase)||0,qty:it.qty,total:it.total})),time:new Date().toISOString()};
+  const h={id:editingBillingHistoryId!==null?Number(editingBillingHistoryId):Date.now(),amount:Math.round(total*100)/100,expression:String(document.getElementById('billing-edit-expression')?.value||'').trim()||items.map(it=>String(Number(it.rate)||0)).join('+'),upi,bill,shop:(getInvoiceShopName('billing')||document.getElementById('invoice-shop-name')?.value||'YOUR SHOP NAME').trim(),title:(document.getElementById('invoice-title-input')?.value||'PAYMENT INVOICE').trim(),discount:Math.max(0,mrp-baseTotal),displaySettings:getInvoiceDisplaySettings('billing'),paymentMode:billingPaymentMode,paymentOfferMessage:getBillingPaymentOfferMessage(),received:Number(billingReceived)||0,change:Math.max(0,(Number(billingReceived)||0)-total),paymentStatus:(Number(billingReceived)||0>=total?'received':'pending'),receivedAt:((Number(billingReceived)||0>=total)?new Date().toISOString():null),items:items.map(it=>({name:it.name,price:it.price,rate:it.rate,purchase:Number(it.purchase)||0,qty:it.qty,total:it.total})),time:new Date().toISOString()};
   const history=getHistory("pos");
   if(editingBillingHistoryId!==null){const idx=history.findIndex(x=>Number(x.id)===Number(editingBillingHistoryId));if(idx>=0){history[idx]=h;localStorage.setItem(POS_BILLING_HISTORY_KEY,JSON.stringify(history.slice(0,2000)));editingBillingHistoryId=null;return true;}}
   // Do not reject a legitimate bill merely because it has the same number/amount
