@@ -297,6 +297,33 @@ button.touch-ripple{position:relative;overflow:hidden;}
 }
 </style>
 
+<style id="calculator-expression-symbol-colors">
+/* Calculator expression: only + - × ÷ % ( ) are green; numbers stay normal.
+   The real input remains active for caret/editing while this layer provides
+   per-character colouring without changing calculation logic. */
+.calculator-expression-visual-wrap{
+  position:relative;width:100%;min-width:0;overflow:hidden;
+}
+#display-expr{position:relative;z-index:2;}
+#display-expr-colored{
+  position:absolute;z-index:1;inset:0;box-sizing:border-box;
+  padding:0; margin:0;
+  color:var(--text);font:inherit;font-size:30px;font-weight:500;
+  line-height:normal;text-align:right;white-space:nowrap;
+  overflow:hidden;pointer-events:none;
+  -webkit-user-select:none;user-select:none;
+}
+#display-expr-colored .calc-symbol{color:#22c55e;font-weight:700;}
+#display-expr[data-symbol-color="true"]{color:transparent!important;text-shadow:none!important;background:transparent!important;}
+#display-expr[data-symbol-color="true"]::selection{background:rgba(59,130,246,.25);}
+#display-expr-colored.long-expression{font-size:24px;}
+#display-expr-colored.very-long-expression{font-size:19px;}
+@media(max-width:420px){
+  #display-expr-colored.long-expression{font-size:22px;}
+  #display-expr-colored.very-long-expression{font-size:17px;}
+}
+</style>
+
 <script id="calculator-keyboard-suppression">
 (function(){
   function installCalculatorKeyboardGuard(){
@@ -506,7 +533,7 @@ body.modal-front-open{overflow:hidden!important}
 #billing-overlay .billing-cart{overflow:visible;}
 #billing-overlay .billing-cart-head,
 #billing-overlay .billing-cart-row{
-  grid-template-columns:22px minmax(0,1fr) 44px 76px 62px 64px 38px !important;
+  grid-template-columns:22px minmax(0,1fr) 44px 72px 54px 64px 64px 38px !important;
   gap:3px !important;
   width:100%;
   box-sizing:border-box;
@@ -518,10 +545,11 @@ body.modal-front-open{overflow:hidden!important}
 #billing-overlay .billing-cart-row .qty-stepper button{width:20px;height:32px;font-size:16px;font-weight:900;}
 #billing-overlay .billing-cart-row .qty-stepper input{height:32px;}
 #billing-overlay .billing-cart-row>span{font-size:12px;font-weight:900;}
+#billing-overlay .billing-cart-row .billing-final-rate{font-size:12px;font-weight:900;}
 #billing-overlay .billing-cart-row .cart-del{display:flex !important;align-items:center;justify-content:center;width:38px !important;height:36px !important;border-radius:10px;font-size:21px !important;font-weight:900;visibility:visible !important;opacity:1 !important;}
 @media(max-width:520px){
   #billing-overlay .billing-cart-head,
-  #billing-overlay .billing-cart-row{grid-template-columns:22px minmax(105px,1fr) 44px 76px 58px 64px 38px !important;gap:2px !important;}
+  #billing-overlay .billing-cart-row{grid-template-columns:22px minmax(82px,1fr) 42px 68px 52px 60px 60px 32px !important;gap:2px !important;}
 }
 </style>
 
@@ -1062,7 +1090,10 @@ body.home-mode{background:var(--sa-home-bg);align-items:center;overflow:hidden}
     </div>
 
     <div class="display-container">
-        <input class="expression" id="display-expr" type="text" value="0" inputmode="none" enterkeyhint="done" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Calculator expression" data-keyboard-suppressed="true">
+        <div class="calculator-expression-visual-wrap">
+            <input class="expression" id="display-expr" type="text" value="0" inputmode="none" enterkeyhint="done" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Calculator expression" data-keyboard-suppressed="true">
+            <div id="display-expr-colored" aria-hidden="true"></div>
+        </div>
         <div class="result-preview" id="display-res"></div>
     </div>
 
@@ -1160,12 +1191,16 @@ body.home-mode{background:var(--sa-home-bg);align-items:center;overflow:hidden}
     let justEvaluated = false;
 
     const displayExpr = document.getElementById("display-expr");
+    const displayExprColored = document.getElementById("display-expr-colored");
     const displayRes = document.getElementById("display-res");
 
     // The calculation bar is a real text input. Touching any character places the
     // native caret at that exact position — no popup/editor window is opened.
     displayExpr.addEventListener("input", handleExpressionInput);
     displayExpr.addEventListener("keydown", handleExpressionKeydown);
+    displayExpr.addEventListener("scroll", () => {
+        if(displayExprColored) displayExprColored.scrollLeft = displayExpr.scrollLeft;
+    }, {passive:true});
     displayExpr.addEventListener("focus", () => { displayExpr.dataset.editing = "true"; });
     displayExpr.addEventListener("blur", () => { displayExpr.dataset.editing = "false"; });
     // Result is display-only; touching the calculation itself is the edit target.
@@ -1308,6 +1343,32 @@ function toggleTheme(){
         document.getElementById('theme-btn').innerText=document.body.classList.contains('dark')?'🌙':'☀️';
     })();
 
+    function renderCalculatorExpressionColors(value){
+        if(!displayExprColored) return;
+        const text=String(value ?? '');
+        displayExprColored.classList.toggle('long-expression', text.length > 24);
+        displayExprColored.classList.toggle('very-long-expression', text.length > 45);
+        displayExprColored.innerHTML='';
+        const fragment=document.createDocumentFragment();
+        for(const ch of text){
+            if('+-×÷%()'.includes(ch)){
+                const span=document.createElement('span');
+                span.className='calc-symbol';
+                span.textContent=ch;
+                fragment.appendChild(span);
+            }else{
+                fragment.appendChild(document.createTextNode(ch));
+            }
+        }
+        displayExprColored.appendChild(fragment);
+        displayExprColored.scrollLeft=displayExpr.scrollLeft;
+        displayExpr.dataset.symbolColor='true';
+    }
+
+    function updateCalculatorExpressionColorLayer(){
+        renderCalculatorExpressionColors(displayExpr ? displayExpr.value : expr);
+    }
+
     function updateDisplay(keepCaret = false) {
         const active = document.activeElement === displayExpr;
         const start = active ? displayExpr.selectionStart : null;
@@ -1316,6 +1377,7 @@ function toggleTheme(){
         if (displayExpr.value !== nextValue) displayExpr.value = nextValue;
         displayExpr.classList.toggle('long-expression', nextValue.length > 24);
         displayExpr.classList.toggle('very-long-expression', nextValue.length > 45);
+        renderCalculatorExpressionColors(nextValue);
         if (active && keepCaret && start !== null) {
             const max = displayExpr.value.length;
             displayExpr.setSelectionRange(Math.min(start,max), Math.min(end ?? start,max));
@@ -2612,7 +2674,14 @@ function renderHistory(){
     discountPercent:Object.prototype.hasOwnProperty.call(it,'discountPercent')
       ? Math.min(100,Math.max(0,Number(it.discountPercent)||0))
       : savedDiscountPercent,
-    _baseSaleRate:it._baseSaleRate!==undefined ? Number(it._baseSaleRate)||0 : undefined
+    // History may contain older records where the effective `rate` was saved
+    // after a Credit Card/MDR charge. Prefer the saved uncharged base rate
+    // so reopening and switching modes can never compound that old charge.
+    _baseSaleRate:it._baseSaleRate!==undefined
+      ? Number(it._baseSaleRate)||0
+      : (it.baseRate!==undefined
+          ? Number(it.baseRate)||0
+          : (it.originalRate!==undefined ? Number(it.originalRate)||0 : undefined))
   }));
   billingPaymentMode=['Cash','UPI','Credit Card','MDR'].includes(String(item.paymentMode||'')) ? String(item.paymentMode) : 'Cash'; billingReceived=Number(item.received)||0;
   if(Object.prototype.hasOwnProperty.call(item,'paymentOfferMessage')) saveBillingOfferMessage(billingPaymentMode,item.paymentOfferMessage);
@@ -3426,7 +3495,8 @@ function switchInvoiceCustomizerMode(mode){
 function openInvoiceCustomizer(mode='calculator'){
   document.querySelector('.invoice-custom-window')?.classList.remove('print-tab-active');
   invoiceCustomizationMode=mode==='billing'?'billing':'calculator';
-  if(invoiceCustomizationMode==='billing') loadBillingModeUpi(billingPaymentMode);
+  // Billing payment-mode UPI is already loaded by Billing/History state.
+  // Do not reload localStorage here because History may carry a per-mode UPI snapshot.
   invoiceStudioActiveTemplateId=null; invoiceStudioLastSnapshot=null;
   loadInvoiceDisplaySettings(invoiceCustomizationMode);
   getInvoiceBranch(invoiceCustomizationMode).customization=getInvoiceDisplaySettings(invoiceCustomizationMode);
@@ -3774,7 +3844,9 @@ function formatInvoiceCell(v, forceDecimal=false){
 
 function prepareCustomizedInvoice(){
   if(ensureInvoiceItemsReady()===null)return null;
-  if(invoiceCustomizationMode==='billing') loadBillingModeUpi(billingPaymentMode);
+  // Billing payment-mode UPI is already the active source of truth.
+  // Do not reload localStorage here because a History bill may be using its
+  // saved per-mode UPI snapshot. Reloading would overwrite the historical QR.
   renderInvoiceItems();
   const now=new Date(), upi=(invoiceCustomizationMode==='billing' ? String(getPaymentUpiId()||'').trim() : (document.getElementById('invoice-upi-input').value.trim()||upiInput.value.trim()))||'';
   if(!isValidUpiId(upi)){ alert('Please enter a valid UPI ID, e.g. name@bank'); return null; }
@@ -4161,9 +4233,10 @@ window.addEventListener("load",()=>{updateRecycleCount();loadInvoiceDisplaySetti
 .add-pos-btn{height:30px;border:1px solid var(--border);border-radius:9px;padding:0 10px;background:var(--surface2);color:var(--text);font-size:10px;font-weight:900}
 .add-pos-btn.active{background:var(--blue);color:#fff;border-color:var(--blue)}
 .billing-cart{border:1px solid var(--border);border-radius:13px;overflow:hidden;background:var(--surface);box-shadow:0 2px 8px rgba(0,0,0,.05)}
-.billing-cart-head,.billing-cart-row{display:grid;grid-template-columns:24px minmax(115px,1.8fr) 48px 82px 62px 62px 30px;gap:3px;align-items:center}
+.billing-cart-head,.billing-cart-row{display:grid;grid-template-columns:24px minmax(115px,1.8fr) 48px 76px 58px 66px 66px 30px;gap:3px;align-items:center}
 .billing-cart-head{padding:8px 5px;background:var(--blue);font-size:9px;font-weight:900;color:#fff;white-space:nowrap;letter-spacing:.2px}.billing-discount-tools{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:8px 0}.billing-discount-tools .disc-title{font-weight:800;color:var(--text);font-size:12px}.billing-discount-tools input{width:72px;height:34px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-weight:800;text-align:center}.billing-discount-tools button{height:34px;border:0;border-radius:9px;padding:0 10px;background:var(--blue2);color:var(--blue);font-weight:800}.billing-select-box{width:20px;height:20px;accent-color:#1976d2;cursor:pointer}.billing-selected-rate{background:var(--blue2)!important;font-weight:800}.billing-rate-hint{font-size:8px;color:var(--blue);font-weight:700;margin-top:2px}
-.billing-cart-row{padding:6px 5px;border-top:1px solid var(--border);font-size:11px;min-height:46px;background:var(--surface)}.billing-cart-row:nth-child(even){background:var(--surface2)}.billing-cart-row input{width:100%;height:34px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-size:11px;padding:0 5px;text-align:right;box-sizing:border-box}.billing-cart-row .cart-name{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.1;text-align:left}.billing-cart-row .cart-del{height:32px;width:30px;border:0;border-radius:9px;background:var(--danger);color:#d33b3b;font-size:18px;font-weight:900;padding:0}.billing-cart-row>span{font-weight:900;font-size:11.5px;text-align:right;white-space:nowrap}.billing-cart-row .qty-stepper{grid-template-columns:22px 1fr 22px;gap:2px}.billing-cart-row .qty-stepper button{width:22px;height:30px;border-radius:7px;font-size:15px}
+.billing-cart-row{padding:6px 5px;border-top:1px solid var(--border);font-size:11px;min-height:46px;background:var(--surface)}.billing-cart-row:nth-child(even){background:var(--surface2)}.billing-cart-row input{width:100%;height:34px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-size:11px;padding:0 5px;text-align:right;box-sizing:border-box}.billing-cart-row .cart-name{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.1;text-align:left}.billing-cart-row .cart-del{height:32px;width:30px;border:0;border-radius:9px;background:var(--danger);color:#d33b3b;font-size:18px;font-weight:900;padding:0}.billing-cart-row>span{font-weight:900;font-size:11.5px;text-align:right;white-space:nowrap}
+.billing-cart-row .billing-final-rate{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;font-size:11.5px;font-weight:900;cursor:default;user-select:none;-webkit-user-select:none;pointer-events:none}.billing-cart-row .qty-stepper{grid-template-columns:22px 1fr 22px;gap:2px}.billing-cart-row .qty-stepper button{width:22px;height:30px;border-radius:7px;font-size:15px}
 .billing-totals{margin-top:9px;border:1px solid var(--border);border-radius:13px;padding:9px;background:var(--surface2)}
 .billing-total-row{display:flex;justify-content:space-between;padding:4px 1px;font-size:12px}.billing-total-row b{font-size:13px}.billing-total-row.grand{border-top:1px dashed var(--border);margin-top:4px;padding-top:8px;font-size:14px;color:var(--blue)}
 .billing-profit-row{display:flex;justify-content:space-between;padding:4px 1px;font-size:12px}.billing-profit-row b{font-size:13px}.billing-profit-positive{color:#148a52}.billing-profit-negative{color:#d33b3b}
@@ -4179,7 +4252,7 @@ window.addEventListener("load",()=>{updateRecycleCount();loadInvoiceDisplaySetti
 .billing-info-bar{display:flex;justify-content:space-between;gap:8px;margin:8px 1px 0;font-size:10px;color:var(--muted);flex-wrap:wrap}.billing-info-bar #billing-profit-mini{font-weight:800;color:var(--blue)}
 .billing-payment-box{margin-top:8px;border:1px solid var(--border);border-radius:13px;background:var(--surface2);padding:9px}.billing-payment-head{display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:800}.billing-payment-head select{height:32px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);padding:0 8px;font-size:11px;font-weight:700}.billing-payment-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:7px}.billing-payment-grid label{font-size:9px;color:var(--muted);font-weight:700}.billing-payment-grid input{display:block;width:100%;height:35px;margin-top:4px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);padding:0 8px;font-size:12px}.billing-change-card{border:1px solid var(--border);border-radius:9px;background:var(--surface);padding:6px 8px;display:flex;flex-direction:column;justify-content:center}.billing-change-card span{font-size:9px;color:var(--muted);font-weight:700}.billing-change-card b{font-size:14px;margin-top:2px;color:var(--blue)}.billing-change-card.over b{color:#d33b3b}
 .db-note{font-size:10px;color:var(--muted);line-height:1.45;margin:8px 2px}
-@media(max-width:420px){.billing-cart{overflow:hidden}.billing-cart-head,.billing-cart-row{min-width:0;grid-template-columns:22px minmax(100px,1.7fr) 46px 82px 60px 62px 28px;gap:2px}.billing-cart-head{font-size:8.5px;padding:8px 4px}.billing-cart-row{padding:5px 4px;min-height:44px;font-size:10.5px}.billing-cart-row input{height:32px;font-size:10.5px;padding:0 4px}.billing-cart-row .qty-stepper{grid-template-columns:26px minmax(30px,1fr) 26px;gap:1px}.billing-cart-row .qty-stepper button{width:26px;height:29px;font-size:14px}.billing-cart-row .cart-name{font-size:11px}.billing-cart-row .cart-del{width:28px;height:30px;font-size:17px}}
+@media(max-width:420px){.billing-cart{overflow:hidden}.billing-cart-head,.billing-cart-row{min-width:0;grid-template-columns:22px minmax(88px,1.55fr) 44px 72px 54px 62px 62px 28px;gap:2px}.billing-cart-head{font-size:8.5px;padding:8px 4px}.billing-cart-row{padding:5px 4px;min-height:44px;font-size:10.5px}.billing-cart-row input{height:32px;font-size:10.5px;padding:0 4px}.billing-cart-row .qty-stepper{grid-template-columns:26px minmax(30px,1fr) 26px;gap:1px}.billing-cart-row .qty-stepper button{width:26px;height:29px;font-size:14px}.billing-cart-row .cart-name{font-size:11px}.billing-cart-row .cart-del{width:28px;height:30px;font-size:17px}}
 
 .pos-invoice-preview-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:10005;padding:14px}.pos-invoice-preview-overlay.open{display:flex}.pos-invoice-preview-window{width:min(760px,96vw);max-height:94vh;overflow:hidden;background:var(--card,#fff);border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.25)}.pos-preview-header{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid rgba(127,127,127,.2)}.pos-preview-title{font-size:18px;font-weight:800}.pos-preview-sub{font-size:12px;opacity:.65;margin-top:3px}.pos-preview-body{padding:16px;overflow:auto;max-height:calc(94vh - 76px)}.receipt-58-preview{width:58mm;max-width:100%;margin:0 auto;background:#fff;color:#000;padding:8px 6px;font-family:monospace;font-size:8.5px;line-height:1.2;box-sizing:border-box;box-shadow:0 2px 12px rgba(0,0,0,.16);overflow:hidden}.r58-head{text-align:center;border-bottom:1px dashed #000;padding-bottom:5px}.r58-head b,.r58-head strong,.r58-head small{display:block}.r58-head b{font-size:16px;font-weight:900;line-height:1.05}.r58-head strong{font-size:9px;margin-top:2px}.r58-head small{font-size:6.5px;margin-top:2px}.r58-meta{padding:4px 0}.r58-meta>div,.r58-summary>div,.r58-payment>div{display:flex;justify-content:space-between;gap:5px;margin:2px 0}.r58-meta b,.r58-summary b{font-weight:800;text-align:right}.r58-sep{text-align:center;white-space:nowrap;overflow:hidden}.r58-counts{display:grid;grid-template-columns:1fr auto 1fr auto;gap:3px;align-items:center;font-size:7.6px;font-weight:800;padding:2px 0}.r58-counts span:nth-of-type(2){text-align:right}.r58-counts b{text-align:right}.r58-table-head{display:grid;grid-template-columns:2fr 8fr 4fr 4fr 3fr 5fr;gap:0;font-weight:800;font-size:7.5px;white-space:nowrap}.r58-table-head span{text-align:right}.r58-table-head span:nth-child(2){text-align:left}.r58-item-line{display:grid;grid-template-columns:2fr 8fr 4fr 4fr 3fr 5fr;gap:0;white-space:nowrap;font-size:7.5px;min-width:0}.r58-item-line span{overflow:hidden;text-overflow:ellipsis;min-width:0}.r58-item-line b{text-align:right;min-width:0}.r58-item-line .r58-sl{text-align:center}.r58-item-line .r58-name{text-align:left}.r58-item-more{padding-left:0;font-size:7.8px;word-break:break-word}.r58-item-sep{text-align:center;font-size:7px;line-height:1;margin:2px 0;white-space:nowrap;overflow:hidden}.r58-summary{border-top:1px dashed #000;border-bottom:1px dashed #000;padding:4px 0;margin:4px 0}.r58-summary .payable{font-size:10.5px;font-weight:900;margin-top:3px}.r58-payment{font-size:7.5px}.r58-payment span{word-break:break-all;text-align:right}.r58-qr{text-align:center;border-top:1px dashed #000;margin-top:4px;padding-top:5px}.r58-qr #pos-preview-qr{display:inline-block}.r58-qr b,.r58-qr small{display:block}.r58-qr b{font-size:8px;margin-top:2px}.r58-qr small{font-size:6.8px}.r58-foot{text-align:center;border-top:1px dashed #000;margin-top:5px;padding-top:5px}.r58-foot b,.r58-foot strong,.r58-foot span{display:block}.r58-foot strong{font-size:9px;margin-top:2px}.r58-foot span{font-size:7px;margin-top:3px}.pos-preview-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}.cart-name-edit{min-width:0;width:100%;box-sizing:border-box}.cart-name-edit:focus{outline:2px solid #4f8cff}
 @media(max-width:560px){.pos-preview-actions{grid-template-columns:1fr}.receipt-58-preview{font-size:10px}}
@@ -4324,7 +4397,7 @@ window.addEventListener("load",()=>{updateRecycleCount();loadInvoiceDisplaySetti
       </div>
       <div id="billing-search-results" class="billing-search-results"></div>
       <div class="billing-cart">
-        <div class="billing-cart-head"><span>✓</span><span>ITEM</span><span>MRP</span><span>QTY</span><span>RATE</span><span>AMOUNT</span><span></span></div>
+        <div class="billing-cart-head"><span>✓</span><span>ITEM</span><span>MRP</span><span>QTY</span><span>RATE</span><span>FINAL RATE</span><span>AMOUNT</span><span></span></div>
         <div id="billing-cart-body"></div>
       </div>
       <div class="billing-discount-tools"><span class="disc-title">🏷️ Selected MRP Discount</span><input id="billing-discount-percent" type="number" min="0" max="100" step="0.01" value="10" onchange="updateBillingDiscountPercent()"><span>%</span><button onclick="selectAllBillingDiscount()">Select All</button><button onclick="clearBillingDiscountSelection()">Clear</button></div>
@@ -4583,7 +4656,7 @@ function resetItemDatabase(){
   localStorage.setItem(ITEM_DB_KEY,JSON.stringify(XLS_ITEM_DATA.map(x=>({...x}))));
   renderItemDatabase(); renderBillingSearch();
 }
-function moneyShort(v){return "₹ "+(Number(v)||0).toLocaleString("en-IN",{minimumFractionDigits:0,maximumFractionDigits:2});}
+function moneyShort(v){return "₹ "+Math.round(Number(v)||0).toLocaleString("en-IN",{minimumFractionDigits:0,maximumFractionDigits:0});}
 function renderItemDatabase(){
   const box=document.getElementById("db-list"); if(!box)return;
   const q=(document.getElementById("db-search")?.value||"").trim().toLowerCase();
@@ -4927,9 +5000,9 @@ function getCreditCardChargeAmount(base){
       ? Math.round((Number(base)||0)*billingMdrCharge)/100
       : 0;
 }
-// Returns the product sale rate before any payment-mode charge.
-// The original sale rate is kept in x.rate, so switching payment mode
-// never compounds the charge.
+// Returns the product/base sale rate before any payment-mode charge.
+// x.rate is always the editable product/base rate. Payment charges are
+// calculated separately and are never written back into the base rate.
 function getBillingBaseSaleRate(x){
   // _baseSaleRate is the uncharged sale rate for this billing row.
   // Always prefer it once established so switching payment modes never compounds charges.
@@ -4940,16 +5013,18 @@ function getBillingBaseSaleRate(x){
   if(x) x._baseSaleRate=base;
   return base;
 }
-// Payment-mode adjusted rate shown/used for the current bill.
+// Payment-mode adjusted rate used for totals/invoice output.
+// IMPORTANT: this is derived from the base rate and is NEVER stored back into
+// x.rate. This prevents Cash -> Card/MDR -> UPI -> Card charge compounding.
 function getBillingPaymentSaleRate(x){
   const base=getBillingBaseSaleRate(x);
-  // Product sale RATE is always a whole rupee amount (no decimal paise).
-  // Apply the payment-mode charge first, then round the final item rate.
   const adjusted=isCreditCardPayment()
     ? base*(1+Math.max(0,Number(billingCreditCardCharge)||0)/100)
     : isMDRPayment()
       ? base*(1+Math.max(0,Number(billingMdrCharge)||0)/100)
       : base;
+  // Billing money is whole-rupee only: never expose paise/decimals.
+  // Example: ₹305 + 0.5% MDR = ₹306.525 → final rate ₹307.
   return Math.round(adjusted);
 }
 
@@ -4957,8 +5032,10 @@ function getBillingPaymentSaleRate(x){
 function syncPOSPaymentModeLiveToInvoiceStudio(){
   if(typeof invoiceCustomizationMode!=='undefined' && invoiceCustomizationMode!=='billing') return;
   try{
-    // Always reload ONLY the active mode's saved UPI before building invoice data.
-    loadBillingModeUpi(billingPaymentMode);
+    // Do NOT reload global/localStorage UPI here. During History edit the
+    // billing*Upi variables may intentionally contain the historical snapshot.
+    // Reloading here would overwrite that snapshot and leak current settings
+    // into the old bill.
     const activeUpi=String(getPaymentUpiId()||'').trim();
     const upiInputEl=document.getElementById('invoice-upi-input');
     if(upiInputEl) upiInputEl.value=activeUpi;
@@ -4981,6 +5058,8 @@ function setBillingPaymentModeQuick(mode){
   const next=String(mode||'Cash');
   if(!['Cash','UPI','Credit Card','MDR'].includes(next))return;
   billingPaymentMode=next;
+  // Load the selected mode only when the user actually changes mode.
+  // This keeps a History bill's restored mode-wise UPI snapshot intact.
   loadBillingModeUpi(next);
   const hidden=document.getElementById('billing-payment-mode');
   if(hidden)hidden.value=next;
@@ -4992,17 +5071,15 @@ function setBillingPaymentModeQuick(mode){
 function updateBillingPayment(){
   const mode=document.getElementById("billing-payment-mode")?.value || "Cash";
   const received=Math.max(0,Number(document.getElementById("billing-received")?.value)||0);
-  // Recalculate every item rate from its uncharged base whenever payment mode changes.
+  // Payment mode changes must NEVER rewrite the product/base Rate.
+  // Final charged rates are derived by getBillingPaymentSaleRate() only.
+  billingPaymentMode=mode;
   billingCart.forEach(x=>{
     if(x._baseSaleRate==null) x._baseSaleRate=getBillingBaseSaleRate(x);
-    const base=Math.max(0,Number(x._baseSaleRate)||0);
-    x.rate=isCreditCardPayment(mode)
-      ? Math.round(base*(1+Math.max(0,Number(billingCreditCardCharge)||0)/100)*100)/100
-      : isMDRPayment(mode)
-        ? Math.round(base*(1+Math.max(0,Number(billingMdrCharge)||0)/100)*100)/100
-        : base;
+    // Keep x.rate aligned with the uncharged base rate.
+    x.rate=Math.max(0,Number(x._baseSaleRate)||0);
   });
-  billingPaymentMode=mode; billingReceived=received;
+  billingReceived=received;
   saveBillingCart();
   localStorage.setItem("upi-billing-payment-mode",mode);
   // Re-render immediately so the RATE column itself changes in real time.
@@ -5885,21 +5962,8 @@ function clearBillingDiscountSelection(){
 }
 function updateBillingCartField(i,key,val){
   if(!billingCart[i])return;
-  // The visible sale-rate field includes the active payment-mode charge.
-  // Convert it back to the stored base rate before saving, so switching
-  // Cash/UPI/Credit Card/MDR never compounds the charge.
-  if(key==="rate" && (isCreditCardPayment() || isMDRPayment())){
-    const entered=Math.max(0,Number(val)||0);
-    const charge=isCreditCardPayment() ? Number(billingCreditCardCharge)||0 : Number(billingMdrCharge)||0;
-    const factor=1+Math.max(0,charge)/100;
-    const base=factor>0 ? Math.round((entered/factor)*100)/100 : entered;
-    billingCart[i]._baseSaleRate=base;
-    billingCart[i].rate=base;
-    const db=getItemDB(); const d=db.find(x=>Number(x.id)===Number(billingCart[i].id));
-    if(d){d.rate=base;saveItemDB(db);}
-    saveBillingCart(); renderBillingCart();
-    return;
-  }
+  // RATE always means the product/base sale rate, regardless of payment mode.
+  // Credit Card/MDR charges are calculated separately for the final bill total.
   if(key==="name"){
     // Do not rebuild the POS row while typing; rebuilding would steal focus/caret.
     billingCart[i].name=String(val??"");
@@ -5920,8 +5984,18 @@ function updateBillingCartField(i,key,val){
     billingCart[i].rate=billingCart[i]._baseSaleRate;
   }
   if(key==="rate") {
-    billingCart[i].rate=Math.max(0,Math.round(Number(billingCart[i].rate)||0));
-    billingCart[i]._baseSaleRate=billingCart[i].rate;
+    if(billingCart[i].discountSelected){
+      // RATE is derived from MRP while discount is active. Never turn it into
+      // a manual master-rate edit or overwrite the Item DB Rate.
+      billingCart[i].discountPercent=Math.min(100,Math.max(0,Number(billingCart[i].discountPercent ?? billingDiscountPercent)||0));
+      billingCart[i]._baseSaleRate=Math.round((Number(billingCart[i].mrp)||0)*(1-billingCart[i].discountPercent/100));
+      billingCart[i].rate=billingCart[i]._baseSaleRate;
+    }else{
+      // Discount OFF: this is a genuine manual Billing Rate edit.
+      // The entered value is the product/base rate; payment mode never changes it.
+      billingCart[i].rate=Math.max(0,Math.round((Number(billingCart[i].rate)||0)*100)/100);
+      billingCart[i]._baseSaleRate=billingCart[i].rate;
+    }
   }
   if(key==="qty"){
     if(billingCart[i].qty<=0){
@@ -5930,10 +6004,16 @@ function updateBillingCartField(i,key,val){
       return;
     }
   }
-  // Auto-save product master data when MRP/RATE is edited during billing.
+  // Auto-save product master data when a real editable field is changed.
+  // A discounted Billing RATE is calculated from MRP and must never overwrite DB Rate.
   if(key==="mrp" || key==="rate" || key==="purchase"){
     const db=getItemDB(); const d=db.find(x=>Number(x.id)===Number(billingCart[i].id));
-    if(d){d[key]=Number(billingCart[i][key])||0;saveItemDB(db);}
+    if(d){
+      if(key!=="rate" || !billingCart[i].discountSelected){
+        d[key]=Number(billingCart[i][key])||0;
+        saveItemDB(db);
+      }
+    }
   }
   saveBillingCart(); renderBillingCart();
 }
@@ -5987,7 +6067,7 @@ function billingTotals(){
   const baseBill=billingCart.reduce((s,x)=>s+getBillingBaseSaleRate(x)*(Number(x.qty)||0),0);
   const bill=billingCart.reduce((s,x)=>s+getBillingPaymentSaleRate(x)*(Number(x.qty)||0),0);
   const cardCharge=bill-baseBill;
-  return {mrp,bill,baseBill,paymentModeCharge:cardCharge,discount:Math.max(0,mrp-bill)};
+  return {mrp,bill,baseBill,paymentModeCharge:cardCharge,discount:Math.max(0,mrp-baseBill)};
 }
 function renderBillingCart(){
   const box=document.getElementById("billing-cart-body"); if(!box)return;
@@ -5999,9 +6079,11 @@ function renderBillingCart(){
     const baseRate=Math.max(0,Number(x._baseSaleRate)||0);
     const eff=getBillingPaymentSaleRate(x); const mrp=Number(x.mrp)||0; const qty=Number(x.qty)||0;
     const name=String(x.name||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
-    const rateDisplay=(isCreditCardPayment() || isMDRPayment()) ? Number(eff).toFixed(2) : String(Math.round(eff));
-    const chargeTitle=isCreditCardPayment() ? 'Payment charge '+Number(billingCreditCardCharge||0)+'% included' : isMDRPayment() ? 'MDR charge '+Number(billingMdrCharge||0)+'% included' : 'Sale rate';
-    return '<div class="billing-cart-row"><input class="billing-select-box" type="checkbox" '+(selected?'checked':'')+' aria-label="Apply MRP discount" onchange="toggleBillingItemDiscount('+i+',this.checked)"><input class="cart-name cart-name-edit" value="'+name+'" title="Edit item name" oninput="updateBillingCartField('+i+',\'name\',this.value)"><input type="number" min="0" step="0.01" value="'+mrp+'" onchange="updateBillingCartField('+i+',\'mrp\',this.value)"><div class="qty-stepper"><button onclick="changeBillingQty('+i+',-1)">−</button><input type="number" min="0" step="1" value="'+qty+'" onchange="updateBillingCartField('+i+',\'qty\',this.value)"><button onclick="changeBillingQty('+i+',1)">+</button></div><input class="'+(selected?'billing-selected-rate':'')+'" type="number" min="0" step="1" value="'+rateDisplay+'" title="'+chargeTitle+'" '+(selected?'readonly':'onchange="updateBillingCartField('+i+',\'rate\',this.value)"')+'><span>'+moneyShort(eff*qty)+'</span><button class="cart-del" onclick="removeBillingCartItem('+i+')">×</button></div>';
+    // RATE column always shows the product/base rate. Payment charge is added
+    // only to the final bill total/invoice calculation.
+    const rateDisplay=String(Math.round(Number(baseRate)||0));
+    const chargeTitle=isCreditCardPayment() ? 'Base sale rate • '+Number(billingCreditCardCharge||0)+'% Credit Card charge added separately' : isMDRPayment() ? 'Base sale rate • '+Number(billingMdrCharge||0)+'% MDR charge added separately' : 'Base sale rate';
+    return '<div class="billing-cart-row"><input class="billing-select-box" type="checkbox" '+(selected?'checked':'')+' aria-label="Apply MRP discount" onchange="toggleBillingItemDiscount('+i+',this.checked)"><input class="cart-name cart-name-edit" value="'+name+'" title="Edit item name" oninput="updateBillingCartField('+i+',\'name\',this.value)"><input type="number" min="0" step="0.01" value="'+mrp+'" onchange="updateBillingCartField('+i+',\'mrp\',this.value)"><div class="qty-stepper"><button onclick="changeBillingQty('+i+',-1)">−</button><input type="number" min="0" step="1" value="'+qty+'" onchange="updateBillingCartField('+i+',\'qty\',this.value)"><button onclick="changeBillingQty('+i+',1)">+</button></div><input class="'+(selected?'billing-selected-rate':'')+'" type="number" min="0" step="0.01" value="'+rateDisplay+'" title="'+chargeTitle+'" '+(selected?'readonly':'onchange="updateBillingCartField('+i+',\'rate\',this.value)"')+'><span class="billing-final-rate" aria-readonly="true" title="Final Rate • Locked">'+String(Math.round(Number(eff)||0))+'</span><span>'+moneyShort(Math.round((Number(eff)||0)*qty))+'</span><button class="cart-del" onclick="removeBillingCartItem('+i+')">×</button></div>';
   }).join("");
   const t=billingTotals();
   const cost=billingCart.reduce((s,x)=>s+(Number(x.purchase)||0)*(Number(x.qty)||0),0);
@@ -6549,7 +6631,7 @@ async function printPOSInvoice58mm(saveHistory=true){
 .billing-cart{overflow:hidden;background:var(--surface);box-shadow:0 2px 8px rgba(0,0,0,.05)}
 .billing-cart-head,.billing-cart-row{
   display:grid;
-  grid-template-columns:24px minmax(115px,1.8fr) 48px 82px 62px 62px 30px;
+  grid-template-columns:24px minmax(115px,1.8fr) 48px 76px 58px 66px 66px 30px;
   gap:3px;
   align-items:center;
 }
@@ -6564,7 +6646,7 @@ async function printPOSInvoice58mm(saveHistory=true){
 .billing-cart-row>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;font-size:11.5px;font-weight:900}
 .billing-cart-row .cart-del{width:30px;height:32px;padding:0;font-size:18px}
 @media(max-width:420px){
-  .billing-cart-head,.billing-cart-row{grid-template-columns:22px minmax(100px,1.7fr) 46px 82px 60px 62px 28px;gap:2px}
+  .billing-cart-head,.billing-cart-row{grid-template-columns:22px minmax(88px,1.55fr) 44px 72px 54px 62px 62px 28px;gap:2px}
   .billing-cart-head{padding:8px 4px;font-size:8.5px}
   .billing-cart-row{padding:5px 4px;min-height:44px;font-size:10.5px}
   .billing-cart-row input:not(.billing-select-box){height:32px;font-size:10.5px;padding:0 4px}
@@ -6581,7 +6663,7 @@ async function printPOSInvoice58mm(saveHistory=true){
 (function(){
   function fixBillingHeader(){
     const h=document.querySelector('#billing-overlay .billing-cart-head');
-    if(h){const c=h.children;if(c.length>=6)c[5].textContent='AMOUNT';}
+    if(h){const c=h.children;if(c.length>=7)c[6].textContent='AMOUNT';}
   }
   document.addEventListener('DOMContentLoaded',fixBillingHeader);
   setTimeout(fixBillingHeader,300);
