@@ -60,7 +60,7 @@ html,body{width:100%;height:100%;overflow:hidden}body{background:var(--bg);color
 .history-window{width:min(100%,430px);height:min(100%,760px);background:var(--surface);border:1px solid var(--border);border-radius:25px;box-shadow:0 18px 55px rgba(0,0,0,.25);overflow:hidden;display:flex;flex-direction:column}
 .history-header{display:flex;justify-content:space-between;align-items:center;padding:17px 18px 12px;border-bottom:1px solid var(--border)}
 .history-title{font-size:19px;font-weight:700}.history-subtitle{font-size:11px;color:var(--muted);margin-top:3px}
-.close-history{width:36px;height:36px;border:0;border-radius:50%;background:var(--surface2);color:var(--text);font-size:17px}
+.close-history{width:36px;height:36px;border:0;border-radius:50%;background:var(--surface2);color:var(--text);font-size:17px;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;transition:transform .10s ease,background-color .10s ease,color .10s ease,box-shadow .10s ease}.close-history:active,.close-history.db-close-touch-active{transform:scale(.88);background:#16a34a!important;color:#fff!important;box-shadow:0 0 0 3px rgba(22,163,74,.20)}
 .history-toolbar{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;font-size:12px;color:var(--muted)}
 .history-source-tabs{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding:0 12px 10px}.history-source-tab{border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:11px;padding:10px 8px;font-size:11px;font-weight:900;cursor:pointer}.history-source-tab.active{background:var(--blue);color:#fff;border-color:var(--blue)}
 .date-sales{margin:0 12px 10px;border:1px solid var(--border);border-radius:15px;background:var(--surface2);padding:10px}.date-sales-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.date-sales-title{font-size:12px;font-weight:800;color:var(--text)}.date-sales-input{height:34px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);padding:0 8px;font-size:11px}.date-sales-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}.date-sales-stat{padding:10px;border-radius:12px;background:var(--surface);border:1px solid var(--border);min-height:48px}.date-sales-stat span{display:block;font-size:9px;color:var(--muted);font-weight:600}.date-sales-stat b{display:block;font-size:15px;margin-top:3px;color:var(--blue)}.date-sales-stat.loss b{color:#d64545}.date-pl{display:block;font-size:10px;font-weight:700;margin-top:2px;color:var(--blue)}.history-pl{font-size:12px;font-weight:800;margin-top:4px;color:var(--blue)}.history-bill{font-size:11px;font-weight:800;color:var(--text);margin-top:2px}.history-items{font-size:10px;color:var(--muted);margin-top:3px;line-height:1.35}.date-wise-list{margin-top:9px;border-top:1px dashed var(--border);padding-top:7px}.date-wise-row{display:flex;justify-content:space-between;gap:8px;padding:7px 0;font-size:10px;border-bottom:1px solid var(--border)}.date-wise-row:last-child{border-bottom:0}.date-wise-row b{color:var(--blue);text-align:right}.date-wise-row .loss{color:#d64545}
@@ -4207,7 +4207,7 @@ window.addEventListener("load",()=>{updateRecycleCount();loadInvoiceDisplaySetti
 .db-search-row{display:flex;gap:6px;margin-bottom:8px}.billing-search-wrap{flex:1;min-width:0}.billing-camera-btn{height:42px;width:42px;flex:0 0 42px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);color:var(--text);font-size:18px;font-weight:900;cursor:pointer;display:flex;align-items:center;justify-content:center}.billing-camera-btn:active{transform:scale(.97)}
 .db-search{flex:1;height:42px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);color:var(--text);padding:0 11px;outline:0}
 .db-search:focus{border-color:var(--blue)}
-.billing-search-wrap{position:relative;flex:1;min-width:0}.billing-search-wrap .db-search{width:100%;padding-right:46px;transition:background-color .18s ease,border-color .18s ease,box-shadow .18s ease}.billing-search-wrap .db-search.barcode-scan-success{background:#dcfce7!important;border-color:#16a34a!important;color:#166534!important;box-shadow:0 0 0 2px rgba(22,163,74,.14)!important}.billing-search-wrap .db-search.barcode-scan-success::placeholder{color:#15803d!important}.billing-search-clear{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:30px;height:30px;margin:0;padding:0;display:flex;align-items:center;justify-content:center;box-sizing:border-box;border:0;border-radius:9px;background:transparent;color:var(--muted);font-size:20px;line-height:1;font-weight:900;cursor:pointer;z-index:3}.billing-search-wrap{overflow:hidden}.billing-search-clear:hover{background:var(--surface2);color:var(--text)}.billing-barcode-toggle{height:42px;min-width:92px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);color:var(--text);font-weight:900;font-size:11px;padding:0 9px;cursor:pointer;white-space:nowrap}.billing-barcode-toggle.off{color:#d33b3b;border-color:rgba(211,59,59,.35)}.billing-barcode-toggle.on{color:#148a52;border-color:rgba(20,138,82,.45);background:rgba(20,138,82,.08)}.billing-barcode-status{font-size:9px;font-weight:900;margin:2px 1px 7px;color:var(--muted)}.billing-barcode-status.on{color:#148a52}.billing-barcode-not-found{border:1px solid rgba(211,59,59,.38);border-radius:12px;background:rgba(211,59,59,.06);padding:10px;margin-bottom:9px}.billing-barcode-not-found-title{font-size:12px;font-weight:900;color:#d33b3b}.billing-barcode-not-found-code{font-size:11px;font-weight:900;margin-top:4px;word-break:break-all}.billing-barcode-not-found-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:9px}.billing-barcode-not-found-actions button{height:36px;border:0;border-radius:9px;font-size:10px;font-weight:900}.billing-barcode-add{background:var(--blue);color:#fff}.billing-barcode-keyboard{background:var(--surface2);color:var(--blue)}
+.billing-search-wrap{position:relative;flex:1;min-width:0}.billing-search-wrap .db-search{width:100%;padding-right:46px;transition:background-color .18s ease,border-color .18s ease,box-shadow .18s ease}.billing-search-wrap .db-search.barcode-scan-success{background:#dcfce7!important;border-color:#16a34a!important;color:#166534!important;box-shadow:0 0 0 2px rgba(22,163,74,.14)!important}.billing-search-wrap .db-search.barcode-scan-success::placeholder{color:#15803d!important}.billing-search-clear{position:absolute!important;right:6px!important;top:50%!important;transform:translateY(-50%)!important;width:30px!important;height:30px!important;margin:0!important;padding:0!important;display:flex!important;align-items:center!important;justify-content:center!important;box-sizing:border-box!important;border:0!important;border-radius:9px!important;background:transparent!important;color:var(--text)!important;font-size:20px!important;line-height:1!important;font-weight:900!important;cursor:pointer!important;z-index:999!important;touch-action:manipulation!important;-webkit-tap-highlight-color:transparent!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;appearance:none!important;-webkit-appearance:none!important}.billing-search-clear:focus-visible{outline:2px solid var(--blue);outline-offset:1px}.billing-search-clear:active{transform:translateY(-50%) scale(.88)!important;background:#16a34a!important;color:#fff!important;box-shadow:0 0 0 3px rgba(22,163,74,.20)!important}.billing-search-clear.is-touching{transform:translateY(-50%) scale(.88)!important;background:#16a34a!important;color:#fff!important;box-shadow:0 0 0 3px rgba(22,163,74,.20)!important}.billing-search-wrap .billing-search-clear{display:flex!important}.billing-search-wrap{overflow:visible!important}.billing-search-clear:hover{background:var(--surface2);color:var(--text)}.billing-barcode-toggle{height:42px;min-width:92px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);color:var(--text);font-weight:900;font-size:11px;padding:0 9px;cursor:pointer;white-space:nowrap}.billing-barcode-toggle.off{color:#d33b3b;border-color:rgba(211,59,59,.35)}.billing-barcode-toggle.on{color:#148a52;border-color:rgba(20,138,82,.45);background:rgba(20,138,82,.08)}.billing-barcode-status{font-size:9px;font-weight:900;margin:2px 1px 7px;color:var(--muted)}.billing-barcode-status.on{color:#148a52}.billing-barcode-not-found{border:1px solid rgba(211,59,59,.38);border-radius:12px;background:rgba(211,59,59,.06);padding:10px;margin-bottom:9px}.billing-barcode-not-found-title{font-size:12px;font-weight:900;color:#d33b3b}.billing-barcode-not-found-code{font-size:11px;font-weight:900;margin-top:4px;word-break:break-all}.billing-barcode-not-found-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:9px}.billing-barcode-not-found-actions button{height:36px;border:0;border-radius:9px;font-size:10px;font-weight:900}.billing-barcode-add{background:var(--blue);color:#fff}.billing-barcode-keyboard{background:var(--surface2);color:var(--blue)}
 .billing-payment-mode-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;align-items:center;margin:0 0 8px;padding:7px 8px;border:1px solid var(--border);border-radius:12px;background:var(--surface2)} .billing-payment-mode-label{grid-column:1/-1;font-size:9px;font-weight:900;white-space:nowrap;color:var(--muted)} .billing-mode-group{display:flex;gap:3px;align-items:stretch;min-width:0}.billing-mode-btn{flex:1;min-width:0;min-height:36px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-size:10px;font-weight:850;padding:0 6px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .billing-mode-btn.active{border:2px solid var(--blue);background:rgba(22,119,255,.10);color:var(--text)} .billing-mode-btn:active,.billing-mode-edit-btn:active{transform:scale(.98)} .billing-mode-edit-btn{width:29px;min-width:29px;height:36px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--blue);font-size:11px;font-weight:900;padding:0;cursor:pointer}.billing-mode-edit-btn:hover{filter:brightness(.97)} @media(max-width:560px){.billing-payment-mode-row{grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;padding:7px 5px}.billing-payment-mode-label{grid-column:1/-1}.billing-mode-group{width:100%;min-width:0;gap:2px}.billing-mode-btn{min-height:38px;height:38px;font-size:9px;padding:0 2px;border-radius:8px}.billing-mode-edit-btn{width:22px;min-width:22px;height:38px;font-size:9px;border-radius:7px}}}
 
 .db-small-btn{height:42px;border:0;border-radius:12px;background:var(--blue2);color:var(--blue);font-weight:800;padding:0 11px}
@@ -4264,7 +4264,7 @@ window.addEventListener("load",()=>{updateRecycleCount();loadInvoiceDisplaySetti
   <div class="db-billing-window">
     <div class="db-billing-header">
       <div><div class="db-billing-title">📦 Item Database</div><div class="db-billing-sub">Imported from a1111.xls • Add, edit or delete items</div></div>
-      <button class="close-history" onclick="closeItemDatabase()">✕</button>
+      <button class="close-history db-close-button" type="button" aria-label="Close Item Database" onclick="closeItemDatabase()">✕</button>
     </div>
     <div class="db-billing-body">
       <div class="db-tabs">
@@ -4377,7 +4377,7 @@ window.addEventListener("load",()=>{updateRecycleCount();loadInvoiceDisplaySetti
     </div>
     <div class="db-billing-body">
       <div class="db-search-row">
-        <div class="billing-search-wrap"><input id="billing-search" class="db-search" placeholder="Search item / Scan Barcode" oninput="renderBillingSearch()" autocomplete="off" inputmode="search"><button id="billing-search-clear" class="billing-search-clear" type="button" onclick="clearBillingSearchOnly()" aria-label="Clear search">×</button></div>
+        <div class="billing-search-wrap"><input id="billing-search" class="db-search" placeholder="Search item / Scan Barcode" oninput="renderBillingSearch()" autocomplete="off" inputmode="search"><button id="billing-search-clear" class="billing-search-clear" type="button" tabindex="0" onclick="clearBillingSearchWithFeedback(event)" onpointerdown="billingSearchClearPress(this)" onpointerup="billingSearchClearRelease(this)" onpointercancel="billingSearchClearRelease(this)" aria-label="Clear search" title="Clear search">×</button></div>
         <button id="billing-camera-btn" class="billing-camera-btn" type="button" onclick="openBillingCameraScanner()" aria-label="Scan barcode with camera" title="Camera barcode scan">📷</button>
         <button id="billing-barcode-toggle" class="billing-barcode-toggle off" type="button" onclick="toggleBillingBarcodeMode()" aria-pressed="false">🔌 Barcode 🔴 OFF</button>
         <button class="db-small-btn" onclick="openItemDatabase()">📦 Items</button>
@@ -4527,9 +4527,26 @@ function openItemDatabase(){
   document.getElementById("item-db-overlay").setAttribute("aria-hidden","false");
   showDBList();
 }
+document.addEventListener("pointerdown",function(e){
+  const b=e.target?.closest?.("#item-db-overlay .db-close-button");
+  if(!b)return;
+  b.classList.add("db-close-touch-active");
+  clearTimeout(b._dbTouchTimer);
+  b._dbTouchTimer=setTimeout(()=>b.classList.remove("db-close-touch-active"),220);
+},{passive:true});
+
 function closeItemDatabase(){
-  document.getElementById("item-db-overlay").classList.remove("open");
-  document.getElementById("item-db-overlay").setAttribute("aria-hidden","true");
+  const overlay=document.getElementById("item-db-overlay");
+  const btn=overlay?.querySelector(".db-close-button");
+  // Give Android/touch users immediate visual confirmation that the × was touched.
+  if(btn){
+    btn.classList.add("db-close-touch-active");
+    clearTimeout(btn._dbCloseFeedbackTimer);
+    btn._dbCloseFeedbackTimer=setTimeout(()=>btn.classList.remove("db-close-touch-active"),180);
+  }
+  if(!overlay)return;
+  overlay.classList.remove("open");
+  overlay.setAttribute("aria-hidden","true");
 }
 function showDBList(){
   document.getElementById("db-list-panel").style.display="block";
@@ -5399,6 +5416,46 @@ function billingBarcodeText(v){return String(v??'').trim()}
 function billingBarcodeValue(item){return billingBarcodeText(item?.code||item?.barcode||item?.barCode||item?.sku||'')}
 function findBillingItemByExactBarcode(code){const n=billingBarcodeText(code).toLowerCase();if(!n)return null;return getItemDB().find(x=>billingBarcodeValue(x).toLowerCase()===n)||null}
 function clearBillingSearchOnly(keepFocus=true){const input=document.getElementById('billing-search');billingBarcodePendingNotFound='';billingBarcodeRapid=false;if(input){input.value='';renderBillingSearch();if(keepFocus)requestAnimationFrame(()=>{try{input.focus({preventScroll:true})}catch(e){try{input.focus()}catch(_){}}})}}
+function billingSearchClearPress(el){
+  if(!el)return;
+  el.classList.add('is-touching');
+  clearTimeout(el._touchFeedbackTimer);
+}
+function billingSearchClearRelease(el){
+  if(!el)return;
+  clearTimeout(el._touchFeedbackTimer);
+  el._touchFeedbackTimer=setTimeout(()=>el.classList.remove('is-touching'),140);
+}
+function clearBillingSearchWithFeedback(e){
+  if(e){e.preventDefault();e.stopPropagation();}
+  const btn=document.getElementById('billing-search-clear');
+  if(btn){
+    btn.classList.add('is-touching');
+    clearTimeout(btn._touchFeedbackTimer);
+    btn._touchFeedbackTimer=setTimeout(()=>btn.classList.remove('is-touching'),450);
+  }
+  clearBillingSearchOnly(true);
+  let fb=document.getElementById('billing-search-clear-feedback');
+  if(!fb){
+    fb=document.createElement('div');
+    fb.id='billing-search-clear-feedback';
+    fb.setAttribute('role','status');
+    fb.style.cssText='position:absolute;right:42px;top:50%;transform:translateY(-50%);z-index:1001;pointer-events:none;padding:5px 8px;border-radius:8px;background:var(--blue);color:#fff;font-size:10px;font-weight:900;white-space:nowrap;opacity:0;transition:opacity .15s ease,transform .15s ease;';
+    const wrap=document.querySelector('.billing-search-wrap');
+    if(wrap){wrap.appendChild(fb);}
+  }
+  if(fb){
+    fb.textContent='✓ Cleared';
+    fb.style.opacity='1';
+    fb.style.transform='translateY(-50%) scale(1)';
+    clearTimeout(fb._hideTimer);
+    fb._hideTimer=setTimeout(()=>{
+      fb.style.opacity='0';
+      fb.style.transform='translateY(-50%) scale(.96)';
+    },650);
+  }
+}
+
 let billingCameraStream=null;
 let billingCameraScanTimer=null;
 let billingCameraDetector=null;
@@ -8888,7 +8945,7 @@ window.bsLegacyPhysicalPrint=()=>{const dims=$('bs-size').value.split('x');docum
 .billing-kbd-badge{position:absolute;right:4px;top:3px;min-width:20px;height:16px;padding:0 4px;border-radius:5px;background:rgba(0,0,0,.10);color:inherit;font-size:8px;font-weight:950;line-height:16px;text-align:center;pointer-events:none;box-sizing:border-box;z-index:2;}
 .billing-kbd-search-wrap{position:relative!important;}
 .billing-kbd-inline-badge{display:inline-flex!important;align-items:center;justify-content:center;margin-left:6px;min-width:22px;height:18px;padding:0 5px;border-radius:6px;background:rgba(0,0,0,.08);color:inherit;font-size:8px;font-weight:950;line-height:18px;vertical-align:middle;box-sizing:border-box;}
-.billing-kbd-input-badge{position:absolute;right:38px;top:50%;transform:translateY(-50%);height:19px;min-width:24px;padding:0 5px;border-radius:6px;background:var(--blue);color:#fff;font-size:9px;font-weight:950;line-height:19px;text-align:center;pointer-events:none;z-index:3;box-shadow:0 2px 6px rgba(0,0,0,.12);}
+.billing-kbd-input-badge{position:absolute;right:42px;top:50%;transform:translateY(-50%);height:19px;min-width:24px;padding:0 5px;border-radius:6px;background:var(--blue);color:#fff;font-size:9px;font-weight:950;line-height:19px;text-align:center;pointer-events:none;z-index:3;box-shadow:0 2px 6px rgba(0,0,0,.12);}
 .billing-payment-details-kbd{float:right;margin-left:6px;height:24px;padding:0 7px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--blue);font-size:8px;font-weight:900;cursor:pointer;vertical-align:middle;}
 .billing-payment-details-kbd:active{transform:scale(.98);}
 .billing-result.billing-kbd-selected{outline:2px solid var(--blue)!important;outline-offset:-2px;background:rgba(22,119,255,.09)!important;box-shadow:inset 0 0 0 1px rgba(22,119,255,.16);}
@@ -8896,7 +8953,7 @@ window.bsLegacyPhysicalPrint=()=>{const dims=$('bs-size').value.split('x');docum
 @media(max-width:560px){
   .billing-kbd-badge{right:2px;top:2px;min-width:18px;height:14px;line-height:14px;font-size:7px;padding:0 3px;}
   .billing-kbd-inline-badge{min-width:20px;height:16px;line-height:16px;font-size:7px;padding:0 4px;margin-left:4px;}
-  .billing-kbd-input-badge{right:37px;height:17px;min-width:22px;line-height:17px;font-size:8px;}
+  .billing-kbd-input-badge{right:42px;height:17px;min-width:22px;line-height:17px;font-size:8px;}
   .billing-payment-details-kbd{height:22px;font-size:7px;padding:0 5px;margin-left:4px;}
 }
 </style>
